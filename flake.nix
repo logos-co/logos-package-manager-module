@@ -34,6 +34,7 @@
           buildInputs = [ 
             pkgs.qt6.qtbase 
             pkgs.qt6.qtremoteobjects 
+            pkgs.zstd
             logosSdk
             logosLiblogos
           ];
@@ -66,6 +67,7 @@
           buildInputs = [
             pkgs.qt6.qtbase
             pkgs.qt6.qtremoteobjects
+            pkgs.zstd
             logosSdk
             logosLiblogos
           ];

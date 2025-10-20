@@ -24,6 +24,9 @@ public:
 
     // LogosAPI initialization
     Q_INVOKABLE void initLogos(LogosAPI* logosAPIInstance);
+    
+    // Test method
+    Q_INVOKABLE QString testPluginCall(const QString& foo);
 
 private:
     QString m_pluginsDirectory;

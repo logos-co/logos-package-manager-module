@@ -229,3 +229,7 @@ void PackageManagerPlugin::initLogos(LogosAPI* logosAPIInstance) {
     }
     logosAPI = logosAPIInstance;
 }
+
+QString PackageManagerPlugin::testPluginCall(const QString& foo) {
+    return "hello " + foo;
+}
