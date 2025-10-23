@@ -2,7 +2,8 @@
   description = "Logos Package Manager Module - Plugin manager for the Logos system";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Follow the same nixpkgs as logos-liblogos to ensure compatibility
+    nixpkgs.follows = "logos-liblogos/nixpkgs";
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
     logos-liblogos.url = "github:logos-co/logos-liblogos";
   };
@@ -17,45 +18,23 @@
       });
     in
     {
-      packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos }: {
-        default = pkgs.stdenv.mkDerivation rec {
-          pname = "logos-package-manager";
-          version = "1.0.0";
-          
+      packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos }: 
+        let
+          # Common configuration
+          common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos; };
           src = ./.;
           
-          nativeBuildInputs = [ 
-            pkgs.cmake 
-            pkgs.ninja 
-            pkgs.pkg-config
-            pkgs.qt6.wrapQtAppsNoGuiHook
-          ];
+          # Library package
+          lib = import ./nix/lib.nix { inherit pkgs common src; };
+        in
+        {
+          # Individual output
+          logos-package-manager-lib = lib;
           
-          buildInputs = [ 
-            pkgs.qt6.qtbase 
-            pkgs.qt6.qtremoteobjects 
-            pkgs.zstd
-            logosSdk
-            logosLiblogos
-          ];
-          
-          cmakeFlags = [ 
-            "-GNinja"
-            "-DLOGOS_CPP_SDK_ROOT=${logosSdk}"
-            "-DLOGOS_LIBLOGOS_ROOT=${logosLiblogos}"
-            "-DLOGOS_PACKAGE_MANAGER_USE_VENDOR=OFF"
-          ];
-          
-          # Set environment variables for CMake to find the dependencies
-          LOGOS_CPP_SDK_ROOT = "${logosSdk}";
-          LOGOS_LIBLOGOS_ROOT = "${logosLiblogos}";
-          
-          meta = with pkgs.lib; {
-            description = "Logos Package Manager Module - Plugin manager for the Logos system";
-            platforms = platforms.unix;
-          };
-        };
-      });
+          # Default package
+          default = lib;
+        }
+      );
 
       devShells = forAllSystems ({ pkgs, logosSdk, logosLiblogos }: {
         default = pkgs.mkShell {
@@ -68,8 +47,6 @@
             pkgs.qt6.qtbase
             pkgs.qt6.qtremoteobjects
             pkgs.zstd
-            logosSdk
-            logosLiblogos
           ];
           
           shellHook = ''
@@ -83,4 +60,3 @@
       });
     };
 }
-

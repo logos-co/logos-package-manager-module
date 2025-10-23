@@ -231,5 +231,9 @@ void PackageManagerPlugin::initLogos(LogosAPI* logosAPIInstance) {
 }
 
 QString PackageManagerPlugin::testPluginCall(const QString& foo) {
+    // print something to the terminal
+    qDebug() << "--------------------------------";
+    qDebug() << "testPluginCall: " << foo;
+    qDebug() << "--------------------------------";
     return "hello " + foo;
 }
