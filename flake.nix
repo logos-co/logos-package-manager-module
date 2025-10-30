@@ -26,13 +26,23 @@
           
           # Library package
           lib = import ./nix/lib.nix { inherit pkgs common src; };
+
+          # Include package (generated headers from plugin)
+          include = import ./nix/include.nix { inherit pkgs common src lib logosSdk; };
+
+          # Combined package
+          combined = pkgs.symlinkJoin {
+            name = "logos-package-manager";
+            paths = [ lib include ];
+          };
         in
         {
-          # Individual output
+          # Individual outputs
           logos-package-manager-lib = lib;
-          
-          # Default package
-          default = lib;
+          logos-package-manager-include = include;
+
+          # Default package (combined)
+          default = combined;
         }
       );
 
