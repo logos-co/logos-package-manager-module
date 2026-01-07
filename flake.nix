@@ -40,6 +40,7 @@
           # Individual outputs
           logos-package-manager-lib = lib;
           logos-package-manager-include = include;
+          lib = lib;
 
           # Default package (combined)
           default = combined;

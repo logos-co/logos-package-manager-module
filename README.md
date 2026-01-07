@@ -3,7 +3,7 @@
 ## Building with Nix (Recommended)
 
 ### Outputs
-- `.#logos-package-manager-lib`: builds the plugin library (`package_manager_plugin.{dylib|so}`)
+- `.#lib`: builds the plugin library (`package_manager_plugin.{dylib|so}`)
 - `.#logos-package-manager-include`: generates C/C++ headers from the built plugin
 - `.#default`: combined output exposing both `lib/` and `include/`
 
@@ -14,7 +14,7 @@ nix build
 
 Or build specific outputs:
 ```bash
-nix build .#logos-package-manager-lib
+nix build .#lib
 nix build .#logos-package-manager-include
 nix build .#default
 ```
