@@ -2,6 +2,8 @@
 
 #include <QtCore/QObject>
 #include <QJsonArray>
+#include <QNetworkAccessManager>
+#include <QJsonObject>
 #include "package_manager_interface.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
@@ -21,6 +23,8 @@ public:
     QString name() const override { return "package_manager"; }
     QString version() const override { return "1.0.0"; }
     Q_INVOKABLE QJsonArray getPackages();
+    Q_INVOKABLE void setPluginsDirectory(const QString& pluginsDirectory);
+    Q_INVOKABLE bool installPackage(const QString& packageName, const QString& pluginsDirectory);
 
     // LogosAPI initialization
     Q_INVOKABLE void initLogos(LogosAPI* logosAPIInstance);
@@ -30,4 +34,11 @@ public:
 
 private:
     QString m_pluginsDirectory;
+    QNetworkAccessManager* m_networkManager;
+    
+    // Helper methods
+    QString getPlatformKey() const;
+    QJsonArray fetchPackageListFromOnline();
+    bool downloadFile(const QString& url, const QString& destinationPath);
+    QJsonObject findPackageByName(const QJsonArray& packages, const QString& packageName);
 }; 
