@@ -20,10 +20,12 @@ public:
 
     // Implementation of PackageManagerInterface
     Q_INVOKABLE bool installPlugin(const QString& pluginPath) override;
+    bool installPlugin(const QString& pluginPath, bool isCoreModule);
     QString name() const override { return "package_manager"; }
     QString version() const override { return "1.0.0"; }
     Q_INVOKABLE QJsonArray getPackages();
     Q_INVOKABLE void setPluginsDirectory(const QString& pluginsDirectory);
+    Q_INVOKABLE void setUiPluginsDirectory(const QString& uiPluginsDirectory);
     Q_INVOKABLE bool installPackage(const QString& packageName, const QString& pluginsDirectory);
 
     // LogosAPI initialization
@@ -34,6 +36,7 @@ public:
 
 private:
     QString m_pluginsDirectory;
+    QString m_uiPluginsDirectory;
     QNetworkAccessManager* m_networkManager;
     
     // Helper methods

@@ -39,7 +39,12 @@ PackageManagerPlugin::~PackageManagerPlugin()
 
 bool PackageManagerPlugin::installPlugin(const QString& pluginPath)
 {
-    qDebug() << "PackageManager: Installing plugin:" << pluginPath;
+    return installPlugin(pluginPath, true);
+}
+
+bool PackageManagerPlugin::installPlugin(const QString& pluginPath, bool isCoreModule)
+{
+    qDebug() << "PackageManager: Installing plugin:" << pluginPath << "(isCoreModule:" << isCoreModule << ")";
 
     // Verify the source file exists
     QFileInfo sourceFileInfo(pluginPath);
@@ -48,10 +53,26 @@ bool PackageManagerPlugin::installPlugin(const QString& pluginPath)
         return false;
     }
 
-    // Use m_pluginsDirectory if set, otherwise default
-    QString pluginsDirectory = m_pluginsDirectory.isEmpty()
-        ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
-        : m_pluginsDirectory;
+    // Determine destination directory based on module type
+    QString pluginsDirectory;
+    if (isCoreModule) {
+        // Use m_pluginsDirectory if set, otherwise default
+        pluginsDirectory = m_pluginsDirectory.isEmpty()
+            ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
+            : m_pluginsDirectory;
+    } else {
+        // For UI modules, use m_uiPluginsDirectory
+        pluginsDirectory = m_uiPluginsDirectory;
+        if (pluginsDirectory.isEmpty()) {
+            // Auto-fallback: derive ui plugins dir from modules dir
+            QString modulesDir = m_pluginsDirectory.isEmpty()
+                ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
+                : m_pluginsDirectory;
+            QDir modulesDirObj(modulesDir);
+            modulesDirObj.cdUp();
+            pluginsDirectory = modulesDirObj.filePath("plugins");
+        }
+    }
     qDebug() << "Plugins directory:" << pluginsDirectory;
 
     // Make sure we have a valid plugins directory
@@ -151,27 +172,32 @@ bool PackageManagerPlugin::installPlugin(const QString& pluginPath)
         }
     }
     
-    // Use LogosAPI to call the remote method
-    if (!logosAPI) {
-        qWarning() << "Failed to connect to Logos Core registry.";
-        return false;
-    }
+    // Only call processPlugin for core modules
+    if (isCoreModule) {
+        // Use LogosAPI to call the remote method
+        if (!logosAPI) {
+            qWarning() << "Failed to connect to Logos Core registry.";
+            return false;
+        }
 
-    LogosAPIClient* coreManagerClient = logosAPI->getClient("core_manager");
-    if (!coreManagerClient || !coreManagerClient->isConnected()) {
-        qWarning() << "Failed to connect to Logos Core registry.";
-        return false;
-    }
+        LogosAPIClient* coreManagerClient = logosAPI->getClient("core_manager");
+        if (!coreManagerClient || !coreManagerClient->isConnected()) {
+            qWarning() << "Failed to connect to Logos Core registry.";
+            return false;
+        }
 
-    qDebug() << "Calling processPlugin with destinationPath:" << destinationPath;
-    QVariant result = coreManagerClient->invokeRemoteMethod("core_manager_api", "processPlugin", destinationPath);
-    QString pluginName = result.toString();
-    if (pluginName.isEmpty()) {
-        qDebug() << "ERROR: --------------------------------";
-        qWarning() << "Failed to process installed plugin:" << destinationPath;
-        return false;
+        qDebug() << "Calling processPlugin with destinationPath:" << destinationPath;
+        QVariant result = coreManagerClient->invokeRemoteMethod("core_manager_api", "processPlugin", destinationPath);
+        QString pluginName = result.toString();
+        if (pluginName.isEmpty()) {
+            qDebug() << "ERROR: --------------------------------";
+            qWarning() << "Failed to process installed plugin:" << destinationPath;
+            return false;
+        }
+        qDebug() << "Successfully processed installed plugin:" << pluginName;
+    } else {
+        qDebug() << "UI module installed successfully. Skipping processPlugin (not needed for UI modules).";
     }
-    qDebug() << "Successfully processed installed plugin:" << pluginName;
     return true;
 }
 
@@ -190,16 +216,27 @@ QJsonArray PackageManagerPlugin::getPackages() {
         return packagesArray;
     }
 
-    QString checkDir = m_pluginsDirectory;
-    if (checkDir.isEmpty()) {
-        checkDir = QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules");
+    QString modulesDirPath = m_pluginsDirectory;
+    if (modulesDirPath.isEmpty()) {
+        modulesDirPath = QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules");
     }
-    QDir modulesDir(checkDir);
-    bool checkInstalled = modulesDir.exists();
+    QDir modulesDir(modulesDirPath);
+    bool checkModulesInstalled = modulesDir.exists();
+
+    QString pluginsDirPath = m_uiPluginsDirectory;
+    if (pluginsDirPath.isEmpty()) {
+        // Auto-derive plugins dir from modules dir
+        QDir modulesDirObj(modulesDirPath);
+        modulesDirObj.cdUp();
+        pluginsDirPath = modulesDirObj.filePath("plugins");
+    }
+    QDir pluginsDir(pluginsDirPath);
+    bool checkPluginsInstalled = pluginsDir.exists();
 
     for (const QJsonValue& packageVal : onlinePackages) {
         QJsonObject packageObj = packageVal.toObject();
         QString packageName = packageObj.value("name").toString();
+        QString packageType = packageObj.value("type").toString();
         
         QJsonObject filesObj = packageObj.value("files").toObject();
         if (!filesObj.contains(platformKey)) {
@@ -211,11 +248,22 @@ QJsonArray PackageManagerPlugin::getPackages() {
             continue;
         }
 
+        // Check installation status based on module type
         bool isInstalled = false;
-        if (checkInstalled) {
+        bool isCoreModule = (packageType != "ui");
+        
+        if (isCoreModule && checkModulesInstalled) {
             for (const QJsonValue& fileVal : platformFiles) {
                 QString fileName = fileVal.toString();
                 if (modulesDir.exists(fileName)) {
+                    isInstalled = true;
+                    break;
+                }
+            }
+        } else if (!isCoreModule && checkPluginsInstalled) {
+            for (const QJsonValue& fileVal : platformFiles) {
+                QString fileName = fileVal.toString();
+                if (pluginsDir.exists(fileName)) {
                     isInstalled = true;
                     break;
                 }
@@ -224,7 +272,12 @@ QJsonArray PackageManagerPlugin::getPackages() {
 
         QJsonObject resultPackage;
         resultPackage["name"] = packageName;
-        resultPackage["description"] = "";
+        resultPackage["description"] = packageObj.value("description").toString();
+        resultPackage["type"] = packageType;
+        resultPackage["moduleName"] = packageObj.value("moduleName").toString();
+        resultPackage["category"] = packageObj.value("category").toString();
+        resultPackage["author"] = packageObj.value("author").toString();
+        resultPackage["dependencies"] = packageObj.value("dependencies").toArray();
         resultPackage["files"] = platformFiles;
         resultPackage["installed"] = isInstalled;
         packagesArray.append(resultPackage);
@@ -248,6 +301,21 @@ bool PackageManagerPlugin::installPackage(const QString& packageName, const QStr
     if (packageObj.isEmpty()) {
         qWarning() << "Package not found:" << packageName;
         return false;
+    }
+    
+    // Determine module type
+    QString packageType = packageObj.value("type").toString();
+    bool isCoreModule = (packageType != "ui");
+    
+    // Set UI plugins directory if not already set (for UI modules)
+    if (!isCoreModule && m_uiPluginsDirectory.isEmpty()) {
+        // Auto-derive plugins dir from modules dir
+        QDir modulesDir(m_pluginsDirectory.isEmpty() 
+            ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
+            : m_pluginsDirectory);
+        modulesDir.cdUp();
+        m_uiPluginsDirectory = modulesDir.filePath("plugins");
+        qDebug() << "Auto-derived UI plugins directory:" << m_uiPluginsDirectory;
     }
     
     QString platformKey = getPlatformKey();
@@ -298,8 +366,8 @@ bool PackageManagerPlugin::installPackage(const QString& packageName, const QStr
     
     bool allInstalled = true;
     for (const QString& downloadedFile : downloadedFiles) {
-        qDebug() << "Installing downloaded file:" << downloadedFile;
-        if (!installPlugin(downloadedFile)) {
+        qDebug() << "Installing downloaded file:" << downloadedFile << "(type:" << packageType << ")";
+        if (!installPlugin(downloadedFile, isCoreModule)) {
             qWarning() << "Failed to install file:" << downloadedFile;
             allInstalled = false;
         }
@@ -315,7 +383,7 @@ bool PackageManagerPlugin::installPackage(const QString& packageName, const QStr
         return false;
     }
     
-    qDebug() << "Successfully installed package:" << packageName;
+    qDebug() << "Successfully installed package:" << packageName << "(type:" << packageType << ")";
     return true;
 }
 
@@ -448,6 +516,11 @@ bool PackageManagerPlugin::downloadFile(const QString& url, const QString& desti
 void PackageManagerPlugin::setPluginsDirectory(const QString& pluginsDirectory) {
     m_pluginsDirectory = pluginsDirectory;
     qDebug() << "Set plugins directory to:" << m_pluginsDirectory;
+}
+
+void PackageManagerPlugin::setUiPluginsDirectory(const QString& uiPluginsDirectory) {
+    m_uiPluginsDirectory = uiPluginsDirectory;
+    qDebug() << "Set UI plugins directory to:" << m_uiPluginsDirectory;
 }
 
 QJsonObject PackageManagerPlugin::findPackageByName(const QJsonArray& packages, const QString& packageName) {
