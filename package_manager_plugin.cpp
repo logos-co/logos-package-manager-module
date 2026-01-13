@@ -22,6 +22,7 @@
 
 PackageManagerPlugin::PackageManagerPlugin()
     : m_networkManager(nullptr)
+    , m_isInstalling(false)
 {
     qDebug() << "PackageManagerPlugin created";
     qDebug() << "PackageManagerPlugin: LogosAPI initialized";
@@ -34,7 +35,6 @@ PackageManagerPlugin::~PackageManagerPlugin()
         delete logosAPI;
         logosAPI = nullptr;
     }
-    // m_networkManager is a child of this, so it will be deleted automatically
 }
 
 bool PackageManagerPlugin::installPlugin(const QString& pluginPath)
@@ -53,18 +53,14 @@ bool PackageManagerPlugin::installPlugin(const QString& pluginPath, bool isCoreM
         return false;
     }
 
-    // Determine destination directory based on module type
     QString pluginsDirectory;
     if (isCoreModule) {
-        // Use m_pluginsDirectory if set, otherwise default
         pluginsDirectory = m_pluginsDirectory.isEmpty()
             ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
             : m_pluginsDirectory;
     } else {
-        // For UI modules, use m_uiPluginsDirectory
         pluginsDirectory = m_uiPluginsDirectory;
         if (pluginsDirectory.isEmpty()) {
-            // Auto-fallback: derive ui plugins dir from modules dir
             QString modulesDir = m_pluginsDirectory.isEmpty()
                 ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
                 : m_pluginsDirectory;
@@ -151,7 +147,6 @@ bool PackageManagerPlugin::installPlugin(const QString& pluginPath, bool isCoreM
                         QFile destIncludeFile(destIncludePath);
                         if (!destIncludeFile.remove()) {
                             qWarning() << "Failed to remove existing included file:" << destIncludePath;
-                            // Continue anyway - this isn't a fatal error
                         }
                     }
                     
@@ -162,19 +157,15 @@ bool PackageManagerPlugin::installPlugin(const QString& pluginPath, bool isCoreM
                     } else {
                         qWarning() << "Failed to copy included file:" << includeFileName 
                                   << "-" << includeFile.errorString();
-                        // Continue anyway - this isn't a fatal error
                     }
                 } else {
                     qDebug() << "Included file not found:" << sourceIncludePath;
-                    // It's ok if the file doesn't exist - continue with other files
                 }
             }
         }
     }
     
-    // Only call processPlugin for core modules
     if (isCoreModule) {
-        // Use LogosAPI to call the remote method
         if (!logosAPI) {
             qWarning() << "Failed to connect to Logos Core registry.";
             return false;
@@ -195,8 +186,6 @@ bool PackageManagerPlugin::installPlugin(const QString& pluginPath, bool isCoreM
             return false;
         }
         qDebug() << "Successfully processed installed plugin:" << pluginName;
-    } else {
-        qDebug() << "UI module installed successfully. Skipping processPlugin (not needed for UI modules).";
     }
     return true;
 }
@@ -225,7 +214,6 @@ QJsonArray PackageManagerPlugin::getPackages() {
 
     QString pluginsDirPath = m_uiPluginsDirectory;
     if (pluginsDirPath.isEmpty()) {
-        // Auto-derive plugins dir from modules dir
         QDir modulesDirObj(modulesDirPath);
         modulesDirObj.cdUp();
         pluginsDirPath = modulesDirObj.filePath("plugins");
@@ -248,22 +236,22 @@ QJsonArray PackageManagerPlugin::getPackages() {
             continue;
         }
 
-        // Check installation status based on module type
         bool isInstalled = false;
         bool isCoreModule = (packageType != "ui");
-        
+
+        // Select the appropriate directory and check flag based on module type
+        QDir* targetDir = nullptr;
         if (isCoreModule && checkModulesInstalled) {
-            for (const QJsonValue& fileVal : platformFiles) {
-                QString fileName = fileVal.toString();
-                if (modulesDir.exists(fileName)) {
-                    isInstalled = true;
-                    break;
-                }
-            }
+            targetDir = &modulesDir;
         } else if (!isCoreModule && checkPluginsInstalled) {
+            targetDir = &pluginsDir;
+        }
+
+        // Check if any of the platform files exist in the target directory
+        if (targetDir != nullptr) {
             for (const QJsonValue& fileVal : platformFiles) {
                 QString fileName = fileVal.toString();
-                if (pluginsDir.exists(fileName)) {
+                if (targetDir->exists(fileName)) {
                     isInstalled = true;
                     break;
                 }
@@ -303,13 +291,10 @@ bool PackageManagerPlugin::installPackage(const QString& packageName, const QStr
         return false;
     }
     
-    // Determine module type
     QString packageType = packageObj.value("type").toString();
     bool isCoreModule = (packageType != "ui");
     
-    // Set UI plugins directory if not already set (for UI modules)
     if (!isCoreModule && m_uiPluginsDirectory.isEmpty()) {
-        // Auto-derive plugins dir from modules dir
         QDir modulesDir(m_pluginsDirectory.isEmpty() 
             ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
             : m_pluginsDirectory);
@@ -387,6 +372,271 @@ bool PackageManagerPlugin::installPackage(const QString& packageName, const QStr
     return true;
 }
 
+void PackageManagerPlugin::installPackageAsync(const QString& packageName, const QString& pluginsDirectory) {
+    qDebug() << "Installing package async:" << packageName;
+    
+    if (m_isInstalling) {
+        qWarning() << "Another installation is already in progress";
+        emitInstallationEvent(packageName, false, "Another installation is already in progress");
+        return;
+    }
+    
+    m_isInstalling = true;
+    
+    m_asyncState.packageName = packageName;
+    m_asyncState.pluginsDirectory = pluginsDirectory;
+    m_asyncState.filesToDownload.clear();
+    m_asyncState.downloadedFiles.clear();
+    m_asyncState.currentDownloadIndex = 0;
+    m_asyncState.tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    m_asyncState.platformKey = getPlatformKey();
+    
+    m_pluginsDirectory = pluginsDirectory;
+    
+    if (m_asyncState.tempDir.isEmpty()) {
+        finishAsyncInstallation(false, "Failed to get temp directory");
+        return;
+    }
+    
+    if (m_asyncState.platformKey.isEmpty()) {
+        finishAsyncInstallation(false, "Unsupported platform");
+        return;
+    }
+    
+    startAsyncPackageListFetch();
+}
+
+void PackageManagerPlugin::startAsyncPackageListFetch() {
+    if (!m_networkManager) {
+        finishAsyncInstallation(false, "Network manager not initialized");
+        return;
+    }
+    
+    QString urlString = "https://github.com/logos-co/logos-modules/releases/download/outputs-libraries/list.json";
+    QUrl url(urlString);
+    QNetworkRequest request(url);
+    
+    qDebug() << "Async: Fetching package list from:" << urlString;
+    
+    QNetworkReply* reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, &PackageManagerPlugin::onPackageListFetched);
+}
+
+void PackageManagerPlugin::onPackageListFetched() {
+    QNetworkReply* reply = qobject_cast<QNetworkReply*>(sender());
+    if (!reply) {
+        finishAsyncInstallation(false, "Invalid network reply");
+        return;
+    }
+    
+    if (reply->error() != QNetworkReply::NoError) {
+        QString error = reply->errorString();
+        reply->deleteLater();
+        finishAsyncInstallation(false, "Failed to fetch package list: " + error);
+        return;
+    }
+    
+    QByteArray data = reply->readAll();
+    reply->deleteLater();
+    
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+    
+    if (parseError.error != QJsonParseError::NoError) {
+        finishAsyncInstallation(false, "Failed to parse package list JSON: " + parseError.errorString());
+        return;
+    }
+    
+    if (!doc.isArray()) {
+        finishAsyncInstallation(false, "Package list JSON is not an array");
+        return;
+    }
+    
+    QJsonArray packages = doc.array();
+    qDebug() << "Async: Fetched" << packages.size() << "packages";
+    
+    m_asyncState.packageObj = findPackageByName(packages, m_asyncState.packageName);
+    if (m_asyncState.packageObj.isEmpty()) {
+        finishAsyncInstallation(false, "Package not found: " + m_asyncState.packageName);
+        return;
+    }
+    
+    QString packageType = m_asyncState.packageObj.value("type").toString();
+    m_asyncState.isCoreModule = (packageType != "ui");
+    
+    if (!m_asyncState.isCoreModule && m_uiPluginsDirectory.isEmpty()) {
+        QDir modulesDir(m_pluginsDirectory.isEmpty() 
+            ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
+            : m_pluginsDirectory);
+        modulesDir.cdUp();
+        m_uiPluginsDirectory = modulesDir.filePath("plugins");
+        qDebug() << "Auto-derived UI plugins directory:" << m_uiPluginsDirectory;
+    }
+    
+    QJsonObject filesObj = m_asyncState.packageObj.value("files").toObject();
+    if (!filesObj.contains(m_asyncState.platformKey)) {
+        finishAsyncInstallation(false, "Package not available for platform " + m_asyncState.platformKey);
+        return;
+    }
+    
+    QJsonArray platformFiles = filesObj.value(m_asyncState.platformKey).toArray();
+    if (platformFiles.isEmpty()) {
+        finishAsyncInstallation(false, "Package has no files for platform " + m_asyncState.platformKey);
+        return;
+    }
+    
+    for (const QJsonValue& fileVal : platformFiles) {
+        QString fileName = fileVal.toString();
+        if (!fileName.isEmpty()) {
+            m_asyncState.filesToDownload.append(fileName);
+        }
+    }
+    
+    if (m_asyncState.filesToDownload.isEmpty()) {
+        finishAsyncInstallation(false, "No files to download");
+        return;
+    }
+    
+    qDebug() << "Async: Need to download" << m_asyncState.filesToDownload.size() << "files";
+    
+    m_asyncState.currentDownloadIndex = 0;
+    startNextFileDownload();
+}
+
+void PackageManagerPlugin::startNextFileDownload() {
+    if (m_asyncState.currentDownloadIndex >= m_asyncState.filesToDownload.size()) {
+        qDebug() << "Async: All files downloaded, installing...";
+        
+        bool allInstalled = true;
+        QString packageType = m_asyncState.packageObj.value("type").toString();
+        
+        for (const QString& downloadedFile : m_asyncState.downloadedFiles) {
+            qDebug() << "Installing downloaded file:" << downloadedFile << "(type:" << packageType << ")";
+            if (!installPlugin(downloadedFile, m_asyncState.isCoreModule)) {
+                qWarning() << "Failed to install file:" << downloadedFile;
+                allInstalled = false;
+            }
+        }
+        
+        for (const QString& downloadedFile : m_asyncState.downloadedFiles) {
+            QFile::remove(downloadedFile);
+            qDebug() << "Cleaned up temp file:" << downloadedFile;
+        }
+        
+        if (allInstalled) {
+            finishAsyncInstallation(true, "");
+        } else {
+            finishAsyncInstallation(false, "Some files failed to install");
+        }
+        return;
+    }
+    
+    QString fileName = m_asyncState.filesToDownload[m_asyncState.currentDownloadIndex];
+    QString downloadUrl = QString("https://github.com/logos-co/logos-modules/releases/download/outputs-libraries/%1-%2")
+        .arg(m_asyncState.platformKey, fileName);
+    
+    qDebug() << "Async: Downloading file" << (m_asyncState.currentDownloadIndex + 1) 
+             << "of" << m_asyncState.filesToDownload.size() << ":" << fileName;
+    
+    QUrl url(downloadUrl);
+    QNetworkRequest request(url);
+    QNetworkReply* reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, &PackageManagerPlugin::onFileDownloaded);
+}
+
+void PackageManagerPlugin::onFileDownloaded() {
+    QNetworkReply* reply = qobject_cast<QNetworkReply*>(sender());
+    if (!reply) {
+        finishAsyncInstallation(false, "Invalid network reply during download");
+        return;
+    }
+    
+    QString fileName = m_asyncState.filesToDownload[m_asyncState.currentDownloadIndex];
+    
+    if (reply->error() != QNetworkReply::NoError) {
+        QString error = reply->errorString();
+        reply->deleteLater();
+        
+        for (const QString& downloadedFile : m_asyncState.downloadedFiles) {
+            QFile::remove(downloadedFile);
+        }
+        
+        finishAsyncInstallation(false, "Failed to download " + fileName + ": " + error);
+        return;
+    }
+    
+    QByteArray data = reply->readAll();
+    reply->deleteLater();
+    
+    QString destinationPath = QDir(m_asyncState.tempDir).filePath(fileName);
+    
+    QFileInfo fileInfo(destinationPath);
+    QDir destDir = fileInfo.dir();
+    if (!destDir.exists()) {
+        if (!destDir.mkpath(".")) {
+            finishAsyncInstallation(false, "Failed to create destination directory");
+            return;
+        }
+    }
+    
+    QFile file(destinationPath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        finishAsyncInstallation(false, "Failed to open file for writing: " + destinationPath);
+        return;
+    }
+    
+    qint64 bytesWritten = file.write(data);
+    file.close();
+    
+    if (bytesWritten != data.size()) {
+        finishAsyncInstallation(false, "Failed to write all data to file");
+        return;
+    }
+    
+    qDebug() << "Async: Downloaded file:" << destinationPath << "(" << bytesWritten << "bytes)";
+    
+    m_asyncState.downloadedFiles.append(destinationPath);
+    m_asyncState.currentDownloadIndex++;
+    
+    startNextFileDownload();
+}
+
+void PackageManagerPlugin::finishAsyncInstallation(bool success, const QString& error) {
+    QString packageName = m_asyncState.packageName;
+    
+    m_isInstalling = false;
+    m_asyncState.packageName.clear();
+    m_asyncState.filesToDownload.clear();
+    m_asyncState.downloadedFiles.clear();
+    
+    if (success) {
+        qDebug() << "Async: Successfully installed package:" << packageName;
+    } else {
+        qWarning() << "Async: Failed to install package:" << packageName << "-" << error;
+    }
+    
+    emitInstallationEvent(packageName, success, error);
+}
+
+void PackageManagerPlugin::emitInstallationEvent(const QString& packageName, bool success, const QString& error) {
+    if (!logosAPI) {
+        qWarning() << "Cannot emit installation event: LogosAPI not initialized";
+        return;
+    }
+    
+    LogosAPIClient* client = logosAPI->getClient("package_manager");
+    if (!client) {
+        qWarning() << "Cannot emit installation event: package_manager client not available";
+        return;
+    }
+    
+    QVariantList eventData;
+    eventData << packageName << success << error;
+    
+    qDebug() << "Emitting packageInstallationFinished event:" << packageName << success << error;
+    client->onEventResponse(this, "packageInstallationFinished", eventData);
+}
+
 void PackageManagerPlugin::initLogos(LogosAPI* logosAPIInstance) {
     if (logosAPI) {
         delete logosAPI;
@@ -395,7 +645,6 @@ void PackageManagerPlugin::initLogos(LogosAPI* logosAPIInstance) {
 }
 
 QString PackageManagerPlugin::testPluginCall(const QString& foo) {
-    // print something to the terminal
     qDebug() << "--------------------------------";
     qDebug() << "testPluginCall: " << foo;
     qDebug() << "--------------------------------";
