@@ -72,14 +72,14 @@ get_filename_component(LOGOS_DEPS_ROOT "${LOGOS_CPP_SDK_ROOT}" DIRECTORY)
 
 # Find Qt RemoteObjects (needed for LogosAPI)
 if(NOT DEFINED QT_VERSION_MAJOR)
-    find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core RemoteObjects)
+    find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core RemoteObjects Network)
     if(Qt6_FOUND)
         set(QT_VERSION_MAJOR 6)
     else()
         set(QT_VERSION_MAJOR 5)
     endif()
 endif()
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core RemoteObjects)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core RemoteObjects Network)
 
 # Run Logos C++ generator on metadata before compilation
 set(METADATA_JSON "${CMAKE_CURRENT_SOURCE_DIR}/metadata.json")
@@ -179,7 +179,8 @@ add_dependencies(package_manager_plugin run_cpp_generator_package_manager)
 # Link Qt libraries
 target_link_libraries(package_manager_plugin PRIVATE 
     Qt${QT_VERSION_MAJOR}::Core 
-    Qt${QT_VERSION_MAJOR}::RemoteObjects)
+    Qt${QT_VERSION_MAJOR}::RemoteObjects
+    Qt${QT_VERSION_MAJOR}::Network)
 
 # Link SDK library if using installed layout
 if(NOT _cpp_sdk_is_source)
