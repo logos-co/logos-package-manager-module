@@ -188,6 +188,13 @@ if(NOT _cpp_sdk_is_source)
     target_link_libraries(package_manager_plugin PRIVATE ${LOGOS_SDK_LIB})
 endif()
 
+# Add lgx library
+message(STATUS "Using lgx library at: ${LGX_ROOT}")
+target_include_directories(package_manager_plugin PRIVATE ${LGX_ROOT}/include)
+find_library(LGX_LIB lgx PATHS ${LGX_ROOT}/lib NO_DEFAULT_PATH REQUIRED)
+message(STATUS "Found lgx library: ${LGX_LIB}")
+target_link_libraries(package_manager_plugin PRIVATE ${LGX_LIB})
+
 # Include directories
 target_include_directories(package_manager_plugin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -226,18 +233,19 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     if(APPLE)
         # macOS specific settings
         set_target_properties(package_manager_plugin PROPERTIES
-            INSTALL_RPATH "@loader_path"
+            INSTALL_RPATH "@loader_path;${LGX_ROOT}/lib"
             INSTALL_NAME_DIR "@rpath"
             BUILD_WITH_INSTALL_NAME_DIR TRUE)
         
         add_custom_command(TARGET package_manager_plugin POST_BUILD
             COMMAND install_name_tool -id "@rpath/package_manager_plugin.dylib" $<TARGET_FILE:package_manager_plugin>
+            COMMAND install_name_tool -change "${LGX_LIB}" "@rpath/liblgx.dylib" $<TARGET_FILE:package_manager_plugin>
             COMMENT "Updating library paths for macOS"
         )
     else()
         # Linux specific settings
         set_target_properties(package_manager_plugin PROPERTIES
-            INSTALL_RPATH "$ORIGIN"
+            INSTALL_RPATH "$ORIGIN:${LGX_ROOT}/lib"
             INSTALL_RPATH_USE_LINK_PATH FALSE)
     endif()
 endif()

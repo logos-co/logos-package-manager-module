@@ -57,12 +57,10 @@ private:
         int currentDownloadIndex;
         bool isCoreModule;
         QString tempDir;
-        QString platformKey;
     };
     AsyncInstallState m_asyncState;
     bool m_isInstalling = false;
     
-    QString getPlatformKey() const;
     QJsonArray fetchPackageListFromOnline();
     bool downloadFile(const QString& url, const QString& destinationPath);
     QJsonObject findPackageByName(const QJsonArray& packages, const QString& packageName);
@@ -70,4 +68,8 @@ private:
     void startNextFileDownload();
     void finishAsyncInstallation(bool success, const QString& error);
     void emitInstallationEvent(const QString& packageName, bool success, const QString& error);
+    
+    QString currentPlatformVariant() const;
+    bool extractLgxPackage(const QString& lgxPath, const QString& outputDir, QString& errorMsg);
+    bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, QString& errorMsg);
 };
