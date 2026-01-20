@@ -6,22 +6,24 @@
     nixpkgs.follows = "logos-liblogos/nixpkgs";
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
     logos-liblogos.url = "github:logos-co/logos-liblogos";
+    logos-package.url = "github:logos-co/logos-package";
   };
 
-  outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos }:
+  outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-package }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         pkgs = import nixpkgs { inherit system; };
         logosSdk = logos-cpp-sdk.packages.${system}.default;
         logosLiblogos = logos-liblogos.packages.${system}.default;
+        logosPackageLib = logos-package.packages.${system}.lib;
       });
     in
     {
-      packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos }: 
+      packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosPackageLib }: 
         let
           # Common configuration
-          common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos; };
+          common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosPackageLib; };
           src = ./.;
           
           # Library package
@@ -47,7 +49,7 @@
         }
       );
 
-      devShells = forAllSystems ({ pkgs, logosSdk, logosLiblogos }: {
+      devShells = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosPackageLib }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.cmake
@@ -63,9 +65,11 @@
           shellHook = ''
             export LOGOS_CPP_SDK_ROOT="${logosSdk}"
             export LOGOS_LIBLOGOS_ROOT="${logosLiblogos}"
+            export LGX_ROOT="${logosPackageLib}"
             echo "Logos Package Manager development environment"
             echo "LOGOS_CPP_SDK_ROOT: $LOGOS_CPP_SDK_ROOT"
             echo "LOGOS_LIBLOGOS_ROOT: $LOGOS_LIBLOGOS_ROOT"
+            echo "LGX_ROOT: $LGX_ROOT"
           '';
         };
       });

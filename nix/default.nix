@@ -1,5 +1,5 @@
 # Common build configuration shared across all packages
-{ pkgs, logosSdk, logosLiblogos }:
+{ pkgs, logosSdk, logosLiblogos, logosPackageLib }:
 
 {
   pname = "logos-package-manager";
@@ -25,6 +25,7 @@
     "-GNinja"
     "-DLOGOS_CPP_SDK_ROOT=${logosSdk}"
     "-DLOGOS_LIBLOGOS_ROOT=${logosLiblogos}"
+    "-DLGX_ROOT=${logosPackageLib}"
     "-DLOGOS_PACKAGE_MANAGER_USE_VENDOR=OFF"
   ];
   
@@ -32,6 +33,7 @@
   env = {
     LOGOS_CPP_SDK_ROOT = "${logosSdk}";
     LOGOS_LIBLOGOS_ROOT = "${logosLiblogos}";
+    LGX_ROOT = "${logosPackageLib}";
   };
   
   # Metadata
