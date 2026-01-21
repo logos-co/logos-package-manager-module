@@ -2,12 +2,12 @@
 
 #include <QtCore/QObject>
 #include <QJsonArray>
-#include <QNetworkAccessManager>
-#include <QJsonObject>
-#include <QNetworkReply>
 #include "package_manager_interface.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
+
+// Forward declaration of the library class
+class PackageManagerLib;
 
 class PackageManagerPlugin : public QObject, public PackageManagerInterface
 {
@@ -40,36 +40,11 @@ signals:
     void eventResponse(const QString& eventName, const QVariantList& data);
 
 private slots:
-    void onPackageListFetched();
-    void onFileDownloaded();
+    void onPluginFileInstalled(const QString& pluginPath, bool isCoreModule);
+    void onInstallationFinished(const QString& packageName, bool success, const QString& error);
 
 private:
-    QString m_pluginsDirectory;
-    QString m_uiPluginsDirectory;
-    QNetworkAccessManager* m_networkManager;
+    PackageManagerLib* m_lib;
     
-    struct AsyncInstallState {
-        QString packageName;
-        QString pluginsDirectory;
-        QJsonObject packageObj;
-        QStringList filesToDownload;
-        QStringList downloadedFiles;
-        int currentDownloadIndex;
-        bool isCoreModule;
-        QString tempDir;
-    };
-    AsyncInstallState m_asyncState;
-    bool m_isInstalling = false;
-    
-    QJsonArray fetchPackageListFromOnline();
-    bool downloadFile(const QString& url, const QString& destinationPath);
-    QJsonObject findPackageByName(const QJsonArray& packages, const QString& packageName);
-    void startAsyncPackageListFetch();
-    void startNextFileDownload();
-    void finishAsyncInstallation(bool success, const QString& error);
     void emitInstallationEvent(const QString& packageName, bool success, const QString& error);
-    
-    QString currentPlatformVariant() const;
-    bool extractLgxPackage(const QString& lgxPath, const QString& outputDir, QString& errorMsg);
-    bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, QString& errorMsg);
 };
