@@ -129,9 +129,9 @@ endif()
 
 # Plugin sources
 set(PLUGIN_SOURCES
-    package_manager_plugin.cpp
-    package_manager_plugin.h
-    package_manager_interface.h
+    src/package_manager_plugin.cpp
+    src/package_manager_plugin.h
+    src/package_manager_interface.h
 )
 
 # Add liblogos interface header
@@ -198,6 +198,7 @@ target_link_libraries(package_manager_plugin PRIVATE ${LGX_LIB})
 # Include directories
 target_include_directories(package_manager_plugin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 # Add include directories based on layout type
