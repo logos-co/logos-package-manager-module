@@ -11,7 +11,6 @@ PackageManagerPlugin::PackageManagerPlugin()
     
     m_lib = new PackageManagerLib(this);
     
-    // Connect library signals to wrapper slots
     connect(m_lib, &PackageManagerLib::pluginFileInstalled,
             this, &PackageManagerPlugin::onPluginFileInstalled);
     connect(m_lib, &PackageManagerLib::installationFinished,
@@ -31,7 +30,6 @@ bool PackageManagerPlugin::installPlugin(const QString& pluginPath)
     return installPlugin(pluginPath, true);
 }
 
-// TODO: this isCoreModule will be removed
 bool PackageManagerPlugin::installPlugin(const QString& pluginPath, bool isCoreModule)
 {
     QString errorMsg;
@@ -39,11 +37,8 @@ bool PackageManagerPlugin::installPlugin(const QString& pluginPath, bool isCoreM
     return !installedPath.isEmpty();
 }
 
-// TODO: this isCoreModule will be removed
 void PackageManagerPlugin::onPluginFileInstalled(const QString& pluginPath, bool isCoreModule)
 {
-    // This is called by the library when a plugin file has been installed
-    // Now we need to process it via LogosAPI (for core modules only)
     if (!isCoreModule) {
         return;
     }
@@ -75,11 +70,33 @@ QJsonArray PackageManagerPlugin::getPackages()
     return m_lib->getPackages();
 }
 
+QJsonArray PackageManagerPlugin::getPackages(const QString& category)
+{
+    return m_lib->getPackages(category);
+}
+
+QStringList PackageManagerPlugin::getCategories()
+{
+    return m_lib->getCategories();
+}
+
+QStringList PackageManagerPlugin::resolveDependencies(const QStringList& packageNames)
+{
+    return m_lib->resolveDependencies(packageNames);
+}
+
 bool PackageManagerPlugin::installPackage(const QString& packageName, const QString& pluginsDirectory) 
 {
     qDebug() << "Installing package:" << packageName;
     m_lib->setPluginsDirectory(pluginsDirectory);
     return m_lib->installPackage(packageName);
+}
+
+bool PackageManagerPlugin::installPackages(const QStringList& packageNames, const QString& pluginsDirectory)
+{
+    qDebug() << "Installing packages:" << packageNames;
+    m_lib->setPluginsDirectory(pluginsDirectory);
+    return m_lib->installPackages(packageNames);
 }
 
 void PackageManagerPlugin::installPackageAsync(const QString& packageName, const QString& pluginsDirectory) 
@@ -89,7 +106,13 @@ void PackageManagerPlugin::installPackageAsync(const QString& packageName, const
     m_lib->installPackageAsync(packageName);
 }
 
-// TODO: can likely be refactored to remove emitInstallationEvent
+void PackageManagerPlugin::installPackagesAsync(const QStringList& packageNames, const QString& pluginsDirectory)
+{
+    qDebug() << "Installing packages async:" << packageNames;
+    m_lib->setPluginsDirectory(pluginsDirectory);
+    m_lib->installPackagesAsync(packageNames);
+}
+
 void PackageManagerPlugin::onInstallationFinished(const QString& packageName, bool success, const QString& error)
 {
     emitInstallationEvent(packageName, success, error);

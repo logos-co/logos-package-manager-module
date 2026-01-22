@@ -7,8 +7,6 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 
-// Core package manager library without Logos API dependencies
-// This library handles all the business logic for package management
 class PackageManagerLib : public QObject
 {
     Q_OBJECT
@@ -23,38 +21,36 @@ public:
     QString pluginsDirectory() const { return m_pluginsDirectory; }
     QString uiPluginsDirectory() const { return m_uiPluginsDirectory; }
 
-    // Core installation operations
-    // Returns the destination path where the plugin was installed, or empty string on failure
     QString installPluginFile(const QString& pluginPath, bool isCoreModule, QString& errorMsg);
     
-    // Get list of packages with installation status
     QJsonArray getPackages();
     
-    // Package operations (synchronous)
+    QJsonArray getPackages(const QString& category);
+    
+    QStringList getCategories();
+    
+    QStringList resolveDependencies(const QStringList& packageNames);
+    
     bool installPackage(const QString& packageName);
     
-    // Package operations (asynchronous)
+    bool installPackages(const QStringList& packageNames);
+    
     void installPackageAsync(const QString& packageName);
+    void installPackagesAsync(const QStringList& packageNames);
     bool isInstalling() const { return m_isInstalling; }
 
-    // Network operations
     QJsonArray fetchPackageListFromOnline();
     bool downloadFile(const QString& url, const QString& destinationPath);
     
-    // Utility methods
     QJsonObject findPackageByName(const QJsonArray& packages, const QString& packageName);
     QString currentPlatformVariant() const;
     
-    // LGX operations
     bool extractLgxPackage(const QString& lgxPath, const QString& outputDir, QString& errorMsg);
     bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, QString& errorMsg);
 
 signals:
-    // Emitted when a plugin file has been installed and needs to be processed by the core
-    // (wrapper should call processPlugin via LogosAPI)
     void pluginFileInstalled(const QString& pluginPath, bool isCoreModule);
     
-    // Emitted when async installation completes
     void installationFinished(const QString& packageName, bool success, const QString& error);
 
 private slots:
@@ -74,6 +70,8 @@ private:
         int currentDownloadIndex;
         bool isCoreModule;
         QString tempDir;
+        QStringList packageQueue;
+        int currentPackageIndex;
     };
     AsyncInstallState m_asyncState;
     bool m_isInstalling;
@@ -81,4 +79,9 @@ private:
     void startAsyncPackageListFetch();
     void startNextFileDownload();
     void finishAsyncInstallation(bool success, const QString& error);
+    void startNextPackageInQueue();
+    
+    QStringList resolveDependenciesRecursive(const QString& packageName, const QJsonArray& allPackages, QSet<QString>& processed);
+    QJsonArray filterPackagesByCategory(const QJsonArray& packages, const QString& category);
+    QStringList extractCategories(const QJsonArray& packages);
 };

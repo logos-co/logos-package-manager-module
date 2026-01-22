@@ -6,7 +6,6 @@
 #include "logos_api.h"
 #include "logos_api_client.h"
 
-// Forward declaration of the library class
 class PackageManagerLib;
 
 class PackageManagerPlugin : public QObject, public PackageManagerInterface
@@ -19,21 +18,23 @@ public:
     PackageManagerPlugin();
     ~PackageManagerPlugin();
 
-    // Implementation of PackageManagerInterface
     Q_INVOKABLE bool installPlugin(const QString& pluginPath) override;
     bool installPlugin(const QString& pluginPath, bool isCoreModule);
     QString name() const override { return "package_manager"; }
     QString version() const override { return "1.0.0"; }
     Q_INVOKABLE QJsonArray getPackages();
+    Q_INVOKABLE QJsonArray getPackages(const QString& category);
+    Q_INVOKABLE QStringList getCategories();
+    Q_INVOKABLE QStringList resolveDependencies(const QStringList& packageNames);
     Q_INVOKABLE void setPluginsDirectory(const QString& pluginsDirectory);
     Q_INVOKABLE void setUiPluginsDirectory(const QString& uiPluginsDirectory);
     Q_INVOKABLE bool installPackage(const QString& packageName, const QString& pluginsDirectory);
+    Q_INVOKABLE bool installPackages(const QStringList& packageNames, const QString& pluginsDirectory);
     Q_INVOKABLE void installPackageAsync(const QString& packageName, const QString& pluginsDirectory);
+    Q_INVOKABLE void installPackagesAsync(const QStringList& packageNames, const QString& pluginsDirectory);
 
-    // LogosAPI initialization
     Q_INVOKABLE void initLogos(LogosAPI* logosAPIInstance);
     
-    // Test method
     Q_INVOKABLE QString testPluginCall(const QString& foo);
 
 signals:
