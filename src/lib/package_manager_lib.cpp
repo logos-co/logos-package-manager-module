@@ -99,34 +99,65 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, bool isC
             return QString();
         }
         
-        if (!copyLibraryFromExtracted(tempDir.path(), pluginsDirectory, errorMsg)) {
+        if (!copyLibraryFromExtracted(tempDir.path(), pluginsDirectory, isCoreModule, errorMsg)) {
             qWarning() << "Failed to copy libraries from extracted LGX package:" << errorMsg;
             return QString();
         }
         
         qDebug() << "Successfully installed plugin from LGX package to:" << pluginsDirectory;
         
-        QDir dir(pluginsDirectory);
-        QStringList filters;
+        // Emit signal for each installed library file
+        QString libExtension;
 #if defined(Q_OS_MAC)
-        filters << "*.dylib";
+        libExtension = ".dylib";
 #elif defined(Q_OS_WIN)
-        filters << "*.dll";
+        libExtension = ".dll";
 #else
-        filters << "*.so";
+        libExtension = ".so";
 #endif
-        QFileInfoList libraryFiles = dir.entryInfoList(filters, QDir::Files);
-        
-        for (const QFileInfo& libFileInfo : libraryFiles) {
-            QString libPath = libFileInfo.absoluteFilePath();
-            emit pluginFileInstalled(libPath, isCoreModule);
+
+        if (isCoreModule) {
+            // Core modules: scan flat directory
+            QDir dir(pluginsDirectory);
+            QStringList filters;
+            filters << "*" + libExtension;
+            QFileInfoList libraryFiles = dir.entryInfoList(filters, QDir::Files);
+            
+            for (const QFileInfo& libFileInfo : libraryFiles) {
+                QString libPath = libFileInfo.absoluteFilePath();
+                emit pluginFileInstalled(libPath, isCoreModule);
+            }
+        } else {
+            // UI plugins: scan subdirectories
+            QDir dir(pluginsDirectory);
+            QStringList subdirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+            for (const QString& subdir : subdirs) {
+                QString libPath = pluginsDirectory + "/" + subdir + "/" + subdir + libExtension;
+                if (QFile::exists(libPath)) {
+                    emit pluginFileInstalled(libPath, isCoreModule);
+                }
+            }
         }
         
         return pluginsDirectory;
     }
 
     QString fileName = sourceFileInfo.fileName();
-    QString destinationPath = pluginsDir.filePath(fileName);
+    QString destinationPath;
+    QDir destDir;
+    
+    if (isCoreModule) {
+        // Core modules: flat structure
+        destinationPath = pluginsDir.filePath(fileName);
+        destDir = pluginsDir;
+    } else {
+        // UI plugins: subdirectory structure
+        QString pluginName = sourceFileInfo.completeBaseName();
+        QString pluginSubDir = pluginsDirectory + "/" + pluginName;
+        QDir().mkpath(pluginSubDir);
+        destinationPath = pluginSubDir + "/" + fileName;
+        destDir = QDir(pluginSubDir);
+    }
 
     QFileInfo destFileInfo(destinationPath);
     if (destFileInfo.exists()) {
@@ -164,7 +195,7 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, bool isC
                 if (includeFileName.isEmpty()) continue;
                 
                 QString sourceIncludePath = sourceDir.filePath(includeFileName);
-                QString destIncludePath = pluginsDir.filePath(includeFileName);
+                QString destIncludePath = destDir.filePath(includeFileName);
                 
                 qDebug() << "Checking for included file:" << sourceIncludePath;
                 
@@ -241,24 +272,25 @@ QJsonArray PackageManagerLib::getPackages()
         bool isInstalled = false;
         bool isCoreModule = (packageType != "ui");
 
-        QDir* targetDir = nullptr;
-        if (isCoreModule && checkModulesInstalled) {
-            targetDir = &modulesDir;
-        } else if (!isCoreModule && checkPluginsInstalled) {
-            targetDir = &pluginsDir;
-        }
-
-        if (targetDir != nullptr) {
-            QStringList filters;
+        QString libExtension;
 #if defined(Q_OS_MAC)
-            filters << QString("%1*.dylib").arg(moduleName);
+        libExtension = ".dylib";
 #elif defined(Q_OS_WIN)
-            filters << QString("%1*.dll").arg(moduleName);
+        libExtension = ".dll";
 #else
-            filters << QString("%1*.so").arg(moduleName);
+        libExtension = ".so";
 #endif
-            QFileInfoList matchingFiles = targetDir->entryInfoList(filters, QDir::Files);
+
+        if (isCoreModule && checkModulesInstalled) {
+            // Core modules: check flat structure in modules/
+            QStringList filters;
+            filters << QString("%1*%2").arg(moduleName, libExtension);
+            QFileInfoList matchingFiles = modulesDir.entryInfoList(filters, QDir::Files);
             isInstalled = !matchingFiles.isEmpty();
+        } else if (!isCoreModule && checkPluginsInstalled) {
+            // UI plugins: check in subdirectory plugins/<moduleName>/<moduleName>.<ext>
+            QString pluginPath = pluginsDirPath + "/" + moduleName + "/" + moduleName + libExtension;
+            isInstalled = QFile::exists(pluginPath);
         }
 
         QJsonObject resultPackage;
@@ -843,7 +875,7 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
     return true;
 }
 
-bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, QString& errorMsg)
+bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& errorMsg)
 {
     QString variant = currentPlatformVariant();
     QString variantDir = extractedDir + "/" + variant;
@@ -872,7 +904,18 @@ bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, co
     
     for (const QFileInfo& fileInfo : libraryFiles) {
         QString sourceFile = fileInfo.absoluteFilePath();
-        QString targetPath = targetDir + "/" + fileInfo.fileName();
+        QString targetPath;
+        
+        if (isCoreModule) {
+            // Core modules: flat structure (unchanged)
+            targetPath = targetDir + "/" + fileInfo.fileName();
+        } else {
+            // UI plugins: subdirectory structure
+            QString pluginName = fileInfo.completeBaseName();
+            QString pluginSubDir = targetDir + "/" + pluginName;
+            QDir().mkpath(pluginSubDir);
+            targetPath = pluginSubDir + "/" + fileInfo.fileName();
+        }
         
         if (QFile::exists(targetPath)) {
             if (!QFile::remove(targetPath)) {

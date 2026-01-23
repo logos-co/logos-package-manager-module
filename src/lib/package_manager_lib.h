@@ -46,7 +46,7 @@ public:
     QString currentPlatformVariant() const;
     
     bool extractLgxPackage(const QString& lgxPath, const QString& outputDir, QString& errorMsg);
-    bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, QString& errorMsg);
+    bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& errorMsg);
 
 signals:
     void pluginFileInstalled(const QString& pluginPath, bool isCoreModule);
