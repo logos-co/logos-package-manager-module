@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QQueue>
 
 class PackageManagerLib : public QObject
 {
@@ -75,11 +76,13 @@ private:
     };
     AsyncInstallState m_asyncState;
     bool m_isInstalling;
+    QQueue<QStringList> m_requestQueue;
     
     void startAsyncPackageListFetch();
     void startNextFileDownload();
     void finishAsyncInstallation(bool success, const QString& error);
     void startNextPackageInQueue();
+    void processNextRequestInQueue();
     
     QStringList resolveDependenciesRecursive(const QString& packageName, const QJsonArray& allPackages, QSet<QString>& processed);
     QJsonArray filterPackagesByCategory(const QJsonArray& packages, const QString& category);

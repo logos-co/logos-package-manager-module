@@ -451,15 +451,16 @@ void PackageManagerLib::installPackagesAsync(const QStringList& packageNames)
 {
     qDebug() << "Installing packages async:" << packageNames;
     
-    if (m_isInstalling) {
-        qWarning() << "Another installation is already in progress";
-        emit installationFinished(packageNames.join(", "), false, "Another installation is already in progress");
-        return;
-    }
-    
     if (packageNames.isEmpty()) {
         qWarning() << "No packages to install";
         emit installationFinished("", false, "No packages to install");
+        return;
+    }
+    
+    // If already installing, add request to queue and return
+    if (m_isInstalling) {
+        qDebug() << "Installation in progress, queuing packages:" << packageNames;
+        m_requestQueue.enqueue(packageNames);
         return;
     }
     
@@ -486,7 +487,12 @@ void PackageManagerLib::installPackagesAsync(const QStringList& packageNames)
 void PackageManagerLib::startNextPackageInQueue()
 {
     if (m_asyncState.currentPackageIndex >= m_asyncState.packageQueue.size()) {
-        finishAsyncInstallation(true, "");
+        // All packages in current batch are done, clean up and process next request
+        m_isInstalling = false;
+        m_asyncState.packageName.clear();
+        m_asyncState.packageQueue.clear();
+        m_asyncState.currentPackageIndex = 0;
+        processNextRequestInQueue();
         return;
     }
     
@@ -705,6 +711,21 @@ void PackageManagerLib::finishAsyncInstallation(bool success, const QString& err
     }
     
     emit installationFinished(packageName, success, error);
+    
+    // Process next queued installation if any
+    processNextRequestInQueue();
+}
+
+void PackageManagerLib::processNextRequestInQueue()
+{
+    if (m_requestQueue.isEmpty()) {
+        qDebug() << "No more packages in queue";
+        return;
+    }
+    
+    qDebug() << "Processing next queued installation. Queue size:" << m_requestQueue.size();
+    QStringList nextPackages = m_requestQueue.dequeue();
+    installPackagesAsync(nextPackages);
 }
 
 QJsonArray PackageManagerLib::fetchPackageListFromOnline()
