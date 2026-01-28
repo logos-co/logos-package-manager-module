@@ -32,6 +32,9 @@
           # Include package (generated headers from plugin)
           include = import ./nix/include.nix { inherit pkgs common src lib logosSdk; };
 
+          # CLI package
+          cli = import ./nix/cli.nix { inherit pkgs common src; };
+
           # Combined package
           combined = pkgs.symlinkJoin {
             name = "logos-package-manager";
@@ -42,7 +45,9 @@
           # Individual outputs
           logos-package-manager-lib = lib;
           logos-package-manager-include = include;
+          logos-package-manager-cli = cli;
           lib = lib;
+          cli = cli;
 
           # Default package (combined)
           default = combined;
