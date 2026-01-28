@@ -254,6 +254,11 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     endif()
 endif()
 
+# Add CLI subdirectory (skip for iOS)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_subdirectory(cmd)
+endif()
+
 # Install rules - use lib directory for iOS static libraries
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     install(TARGETS package_manager_plugin

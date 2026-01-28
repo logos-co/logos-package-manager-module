@@ -5,6 +5,7 @@
 ### Outputs
 - `.#lib`: builds the plugin library (`package_manager_plugin.{dylib|so}`)
 - `.#logos-package-manager-include`: generates C/C++ headers from the built plugin
+- `.#cli`: builds the command-line tool (`lgpm`)
 - `.#default`: combined output exposing both `lib/` and `include/`
 
 ### Build the module
@@ -55,8 +56,97 @@ compiled plugin (`package_manager_plugin.{dylib,so}`) and installed under
 nix build .#logos-package-manager-include
 ```
 
+## Command-Line Interface (lgpm)
+
+The package manager includes a CLI tool for searching and installing packages.
+
+### Building the CLI
+
+With Nix:
+```bash
+nix build .#cli
+./result/bin/lgpm --help
+```
+
+With CMake (in development shell):
+```bash
+nix develop
+mkdir build && cd build
+cmake -GNinja ..
+ninja lgpm
+./bin/lgpm --help
+```
+
+### Commands
+
+#### Search packages
+```bash
+lgpm search <query>
+```
+Search packages by name or description.
+
+#### List packages
+```bash
+lgpm list [--category <cat>] [--installed]
+```
+List all available packages. Optionally filter by category or show only installed packages.
+
+#### Install packages
+```bash
+lgpm install <package> [packages...]
+```
+Install one or more packages. Dependencies are resolved automatically.
+
+#### List categories
+```bash
+lgpm categories
+```
+List all available package categories.
+
+#### Show package info
+```bash
+lgpm info <package>
+```
+Display detailed information about a specific package.
+
+### Global Options
+
+| Option | Description |
+|--------|-------------|
+| `--modules-dir <path>` | Set core modules installation directory |
+| `--ui-plugins-dir <path>` | Set UI plugins installation directory |
+| `--json` | Output results in JSON format |
+| `-h, --help` | Show help message |
+| `-v, --version` | Show version information |
+
+### Examples
+
+```bash
+# Search for waku-related packages
+lgpm search waku
+
+# List all packages in JSON format
+lgpm list --json
+
+# List only installed packages
+lgpm list --installed
+
+# Install a package (with automatic dependency resolution)
+lgpm install waku-module
+
+# Install multiple packages
+lgpm install waku-module nwaku-module
+
+# Get detailed info about a package
+lgpm info waku-module
+
+# Install to a custom directory
+lgpm --modules-dir /path/to/modules install waku-module
+```
+
 ## Dependencies
 
 - [logos-cpp-sdk](https://github.com/logos-co/logos-cpp-sdk) - Logos C++ SDK and code generator
 - [logos-liblogos](https://github.com/logos-co/logos-liblogos) - Logos core library
-- Qt6 (Core and RemoteObjects)
+- [logos-package](https://github.com/logos-co/logos-package) - LGX package format library
+- Qt6 (Core and Network)
