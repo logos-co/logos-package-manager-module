@@ -18,6 +18,7 @@
     pkgs.qt6.qtbase 
     pkgs.qt6.qtremoteobjects 
     pkgs.zstd
+    logosPackageLib  # Required for liblgx.so (needed by autoPatchelfHook)
   ];
   
   # Common CMake flags

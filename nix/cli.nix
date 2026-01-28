@@ -6,7 +6,14 @@ pkgs.stdenv.mkDerivation {
   version = common.version;
   
   inherit src;
-  inherit (common) nativeBuildInputs buildInputs cmakeFlags meta env;
+  inherit (common) buildInputs cmakeFlags meta env;
+  
+  # Add autoPatchelfHook on Linux to fix RPATHs
+  nativeBuildInputs = common.nativeBuildInputs ++
+    pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
+  
+  # Clear LD_LIBRARY_PATH to prevent external Qt installations from interfering
+  qtWrapperArgs = [ "--unset LD_LIBRARY_PATH" ];
   
   installPhase = ''
     runHook preInstall
