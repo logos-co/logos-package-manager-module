@@ -55,7 +55,7 @@ void PackageManagerPlugin::onPluginFileInstalled(const QString& pluginPath, bool
     }
 
     qDebug() << "Calling processPlugin with path:" << pluginPath;
-    QVariant result = coreManagerClient->invokeRemoteMethod("core_manager_api", "processPlugin", pluginPath);
+    QVariant result = coreManagerClient->invokeRemoteMethod("core_manager", "processPlugin", pluginPath);
     QString pluginName = result.toString();
     if (pluginName.isEmpty()) {
         qDebug() << "ERROR: --------------------------------";
