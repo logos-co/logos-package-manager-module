@@ -1,60 +1,56 @@
 {
-  description = "Logos Package Manager Module - Plugin manager for the Logos system";
+  description = "Logos Package Manager Module - Plugin wrapper for the Logos system";
 
   inputs = {
     # Follow the same nixpkgs as logos-liblogos to ensure compatibility
     nixpkgs.follows = "logos-liblogos/nixpkgs";
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
     logos-liblogos.url = "github:logos-co/logos-liblogos";
-    logos-package.url = "github:logos-co/logos-package";
+    # Temporarily using local path for static linking fix testing
+    logos-package-manager.url = "path:/Users/iurimatias/Projects/Logos/logos-package-manager";
   };
 
-  outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-package }:
+  outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-package-manager }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         pkgs = import nixpkgs { inherit system; };
         logosSdk = logos-cpp-sdk.packages.${system}.default;
         logosLiblogos = logos-liblogos.packages.${system}.default;
-        logosPackageLib = logos-package.packages.${system}.lib;
+        logosPackageManagerLib = logos-package-manager.packages.${system}.lib;
       });
     in
     {
-      packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosPackageLib }: 
+      packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosPackageManagerLib }: 
         let
           # Common configuration
-          common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosPackageLib; };
+          common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosPackageManagerLib; };
           src = ./.;
           
-          # Library package
+          # Library package (plugin)
           lib = import ./nix/lib.nix { inherit pkgs common src; };
 
           # Include package (generated headers from plugin)
           include = import ./nix/include.nix { inherit pkgs common src lib logosSdk; };
 
-          # CLI package
-          cli = import ./nix/cli.nix { inherit pkgs common src; };
-
           # Combined package
           combined = pkgs.symlinkJoin {
-            name = "logos-package-manager";
+            name = "logos-package-manager-module";
             paths = [ lib include ];
           };
         in
         {
           # Individual outputs
-          logos-package-manager-lib = lib;
-          logos-package-manager-include = include;
-          logos-package-manager-cli = cli;
+          logos-package-manager-module-lib = lib;
+          logos-package-manager-module-include = include;
           lib = lib;
-          cli = cli;
 
           # Default package (combined)
           default = combined;
         }
       );
 
-      devShells = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosPackageLib }: {
+      devShells = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosPackageManagerLib }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.cmake
@@ -70,11 +66,11 @@
           shellHook = ''
             export LOGOS_CPP_SDK_ROOT="${logosSdk}"
             export LOGOS_LIBLOGOS_ROOT="${logosLiblogos}"
-            export LGX_ROOT="${logosPackageLib}"
-            echo "Logos Package Manager development environment"
+            export LOGOS_PACKAGE_MANAGER_ROOT="${logosPackageManagerLib}"
+            echo "Logos Package Manager Module development environment"
             echo "LOGOS_CPP_SDK_ROOT: $LOGOS_CPP_SDK_ROOT"
             echo "LOGOS_LIBLOGOS_ROOT: $LOGOS_LIBLOGOS_ROOT"
-            echo "LGX_ROOT: $LGX_ROOT"
+            echo "LOGOS_PACKAGE_MANAGER_ROOT: $LOGOS_PACKAGE_MANAGER_ROOT"
           '';
         };
       });

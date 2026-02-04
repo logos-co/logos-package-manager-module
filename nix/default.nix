@@ -1,8 +1,8 @@
 # Common build configuration shared across all packages
-{ pkgs, logosSdk, logosLiblogos, logosPackageLib }:
+{ pkgs, logosSdk, logosLiblogos, logosPackageManagerLib }:
 
 {
-  pname = "logos-package-manager";
+  pname = "logos-package-manager-module";
   version = "1.0.0";
   
   # Common native build inputs
@@ -18,7 +18,7 @@
     pkgs.qt6.qtbase 
     pkgs.qt6.qtremoteobjects 
     pkgs.zstd
-    logosPackageLib  # Required for liblgx.so (needed by autoPatchelfHook)
+    logosPackageManagerLib  # Required for libpackage_manager (needed by autoPatchelfHook)
   ];
   
   # Common CMake flags
@@ -26,7 +26,7 @@
     "-GNinja"
     "-DLOGOS_CPP_SDK_ROOT=${logosSdk}"
     "-DLOGOS_LIBLOGOS_ROOT=${logosLiblogos}"
-    "-DLGX_ROOT=${logosPackageLib}"
+    "-DLOGOS_PACKAGE_MANAGER_ROOT=${logosPackageManagerLib}"
     "-DLOGOS_PACKAGE_MANAGER_USE_VENDOR=OFF"
   ];
   
@@ -34,13 +34,12 @@
   env = {
     LOGOS_CPP_SDK_ROOT = "${logosSdk}";
     LOGOS_LIBLOGOS_ROOT = "${logosLiblogos}";
-    LGX_ROOT = "${logosPackageLib}";
+    LOGOS_PACKAGE_MANAGER_ROOT = "${logosPackageManagerLib}";
   };
   
   # Metadata
   meta = with pkgs.lib; {
-    description = "Logos Package Manager Module - Plugin manager for the Logos system";
+    description = "Logos Package Manager Module - Plugin wrapper for the Logos system";
     platforms = platforms.unix;
   };
 }
-
