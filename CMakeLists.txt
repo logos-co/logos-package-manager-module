@@ -127,13 +127,23 @@ else()
     )
 endif()
 
-# Plugin sources
+# Find logos-package-manager library
+if(NOT DEFINED LOGOS_PACKAGE_MANAGER_ROOT)
+    message(FATAL_ERROR "LOGOS_PACKAGE_MANAGER_ROOT must be set to the logos-package-manager library location")
+endif()
+
+if(NOT EXISTS "${LOGOS_PACKAGE_MANAGER_ROOT}/include/package_manager_lib.h")
+    message(FATAL_ERROR "logos-package-manager library not found at ${LOGOS_PACKAGE_MANAGER_ROOT}")
+endif()
+
+find_library(PACKAGE_MANAGER_LIB package_manager PATHS ${LOGOS_PACKAGE_MANAGER_ROOT}/lib NO_DEFAULT_PATH REQUIRED)
+message(STATUS "Found package_manager library: ${PACKAGE_MANAGER_LIB}")
+
+# Plugin sources (no longer includes lib/ sources - those are in the external library)
 set(PLUGIN_SOURCES
     src/package_manager_plugin.cpp
     src/package_manager_plugin.h
     src/package_manager_interface.h
-    src/lib/package_manager_lib.cpp
-    src/lib/package_manager_lib.h
 )
 
 # Add liblogos interface header
@@ -190,18 +200,14 @@ if(NOT _cpp_sdk_is_source)
     target_link_libraries(package_manager_plugin PRIVATE ${LOGOS_SDK_LIB})
 endif()
 
-# Add lgx library
-message(STATUS "Using lgx library at: ${LGX_ROOT}")
-target_include_directories(package_manager_plugin PRIVATE ${LGX_ROOT}/include)
-find_library(LGX_LIB lgx PATHS ${LGX_ROOT}/lib NO_DEFAULT_PATH REQUIRED)
-message(STATUS "Found lgx library: ${LGX_LIB}")
-target_link_libraries(package_manager_plugin PRIVATE ${LGX_LIB})
+# Link logos-package-manager library
+target_link_libraries(package_manager_plugin PRIVATE ${PACKAGE_MANAGER_LIB})
 
 # Include directories
 target_include_directories(package_manager_plugin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
+    ${LOGOS_PACKAGE_MANAGER_ROOT}/include
 )
 
 # Add include directories based on layout type
@@ -237,26 +243,21 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     if(APPLE)
         # macOS specific settings
         set_target_properties(package_manager_plugin PROPERTIES
-            INSTALL_RPATH "@loader_path;${LGX_ROOT}/lib"
+            INSTALL_RPATH "@loader_path;${LOGOS_PACKAGE_MANAGER_ROOT}/lib"
             INSTALL_NAME_DIR "@rpath"
             BUILD_WITH_INSTALL_NAME_DIR TRUE)
         
         add_custom_command(TARGET package_manager_plugin POST_BUILD
             COMMAND install_name_tool -id "@rpath/package_manager_plugin.dylib" $<TARGET_FILE:package_manager_plugin>
-            COMMAND install_name_tool -change "${LGX_LIB}" "@rpath/liblgx.dylib" $<TARGET_FILE:package_manager_plugin>
+            COMMAND install_name_tool -change "${PACKAGE_MANAGER_LIB}" "@rpath/libpackage_manager.dylib" $<TARGET_FILE:package_manager_plugin>
             COMMENT "Updating library paths for macOS"
         )
     else()
         # Linux specific settings
         set_target_properties(package_manager_plugin PROPERTIES
-            INSTALL_RPATH "$ORIGIN:${LGX_ROOT}/lib"
+            INSTALL_RPATH "$ORIGIN:${LOGOS_PACKAGE_MANAGER_ROOT}/lib"
             INSTALL_RPATH_USE_LINK_PATH FALSE)
     endif()
-endif()
-
-# Add CLI subdirectory (skip for iOS)
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    add_subdirectory(cmd)
 endif()
 
 # Install rules - use lib directory for iOS static libraries

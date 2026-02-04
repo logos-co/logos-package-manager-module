@@ -1,5 +1,5 @@
 #include "package_manager_plugin.h"
-#include "lib/package_manager_lib.h"
+#include <package_manager_lib.h>
 #include <QDebug>
 #include "logos_api_client.h"
 

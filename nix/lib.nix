@@ -1,4 +1,4 @@
-# Builds the logos-package-manager library
+# Builds the logos-package-manager-module plugin
 { pkgs, common, src }:
 
 pkgs.stdenv.mkDerivation {
@@ -25,4 +25,3 @@ pkgs.stdenv.mkDerivation {
     runHook postInstall
   '';
 }
-
