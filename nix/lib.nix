@@ -1,5 +1,5 @@
 # Builds the logos-package-manager library
-{ pkgs, common, src }:
+{ pkgs, common, src, logosPackageLib }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-lib";
@@ -20,6 +20,16 @@ pkgs.stdenv.mkDerivation {
     else
       echo "Error: No library file found"
       exit 1
+    fi
+    
+    # Bundle liblgx library alongside the plugin so it can be found at runtime
+    # The plugin's rpath is set to @loader_path (macOS) / $ORIGIN (Linux)
+    if [ -f ${logosPackageLib}/lib/liblgx.dylib ]; then
+      cp ${logosPackageLib}/lib/liblgx.dylib $out/lib/
+    elif [ -f ${logosPackageLib}/lib/liblgx.so ]; then
+      cp ${logosPackageLib}/lib/liblgx.so $out/lib/
+    else
+      echo "Warning: liblgx library not found in ${logosPackageLib}/lib/"
     fi
     
     runHook postInstall
