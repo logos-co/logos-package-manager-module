@@ -27,7 +27,7 @@
           src = ./.;
           
           # Library package
-          lib = import ./nix/lib.nix { inherit pkgs common src; };
+          lib = import ./nix/lib.nix { inherit pkgs common src logosPackageLib; };
 
           # Include package (generated headers from plugin)
           include = import ./nix/include.nix { inherit pkgs common src lib logosSdk; };
