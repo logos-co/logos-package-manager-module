@@ -14,6 +14,8 @@
 #include <algorithm>
 #include "lgx.h"
 
+static const QString MODULES_DOWNLOAD_BASE_URL = QStringLiteral("https://github.com/logos-co/logos-modules/releases/latest/download");
+
 PackageManagerLib::PackageManagerLib(QObject* parent)
     : QObject(parent)
     , m_networkManager(nullptr)
@@ -414,8 +416,7 @@ bool PackageManagerLib::installPackage(const QString& packageName)
     }
     
     // Download the LGX package file
-    QString downloadUrl = QString("https://github.com/logos-co/logos-modules/releases/download/outputs-libraries/%1")
-        .arg(packageFile);
+    QString downloadUrl = QString("%1/%2").arg(MODULES_DOWNLOAD_BASE_URL, packageFile);
     QString destinationPath = QDir(tempDir).filePath(packageFile);
     
     qDebug() << "Downloading package file:" << packageFile;
@@ -512,7 +513,7 @@ void PackageManagerLib::startAsyncPackageListFetch()
         return;
     }
     
-    QString urlString = "https://github.com/logos-co/logos-modules/releases/download/outputs-libraries/list.json";
+    QString urlString = QString("%1/list.json").arg(MODULES_DOWNLOAD_BASE_URL);
     QUrl url(urlString);
     QNetworkRequest request(url);
     
@@ -624,8 +625,7 @@ void PackageManagerLib::startNextFileDownload()
     }
     
     QString fileName = m_asyncState.filesToDownload[m_asyncState.currentDownloadIndex];
-    QString downloadUrl = QString("https://github.com/logos-co/logos-modules/releases/download/outputs-libraries/%1")
-        .arg(fileName);
+    QString downloadUrl = QString("%1/%2").arg(MODULES_DOWNLOAD_BASE_URL, fileName);
     
     qDebug() << "Async: Downloading package file:" << fileName;
     
@@ -737,7 +737,7 @@ QJsonArray PackageManagerLib::fetchPackageListFromOnline()
         return packagesArray;
     }
 
-    QString urlString = "https://github.com/logos-co/logos-modules/releases/download/outputs-libraries/list.json";
+    QString urlString = QString("%1/list.json").arg(MODULES_DOWNLOAD_BASE_URL);
     QUrl url(urlString);
     QNetworkRequest request(url);
     
