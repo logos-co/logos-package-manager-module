@@ -118,19 +118,8 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, bool isC
         libExtension = ".so";
 #endif
 
-        if (isCoreModule) {
-            // Core modules: scan flat directory
-            QDir dir(pluginsDirectory);
-            QStringList filters;
-            filters << "*" + libExtension;
-            QFileInfoList libraryFiles = dir.entryInfoList(filters, QDir::Files);
-            
-            for (const QFileInfo& libFileInfo : libraryFiles) {
-                QString libPath = libFileInfo.absoluteFilePath();
-                emit pluginFileInstalled(libPath, isCoreModule);
-            }
-        } else {
-            // UI plugins: scan subdirectories
+        // Both core modules and UI plugins use subdirectory structure
+        {
             QDir dir(pluginsDirectory);
             QStringList subdirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
             for (const QString& subdir : subdirs) {
@@ -284,11 +273,9 @@ QJsonArray PackageManagerLib::getPackages()
 #endif
 
         if (isCoreModule && checkModulesInstalled) {
-            // Core modules: check flat structure in modules/
-            QStringList filters;
-            filters << QString("%1*%2").arg(moduleName, libExtension);
-            QFileInfoList matchingFiles = modulesDir.entryInfoList(filters, QDir::Files);
-            isInstalled = !matchingFiles.isEmpty();
+            // Core modules: check subdirectory modules/<moduleName>/<moduleName>.<ext>
+            QString modulePath = modulesDirPath + "/" + moduleName + "/" + moduleName + libExtension;
+            isInstalled = QFile::exists(modulePath);
         } else if (!isCoreModule && checkPluginsInstalled) {
             // UI plugins: check in subdirectory plugins/<moduleName>/<moduleName>.<ext>
             QString pluginPath = pluginsDirPath + "/" + moduleName + "/" + moduleName + libExtension;
@@ -886,6 +873,48 @@ QStringList PackageManagerLib::platformVariantsToTry() const
     return variants;
 }
 
+bool PackageManagerLib::copyDirectoryContents(const QString& srcDir, const QString& destDir, QString& errorMsg)
+{
+    QDir src(srcDir);
+    if (!src.exists()) {
+        errorMsg = QString("Source directory does not exist: %1").arg(srcDir);
+        return false;
+    }
+
+    QDir dest(destDir);
+    if (!dest.exists()) {
+        if (!dest.mkpath(".")) {
+            errorMsg = QString("Failed to create destination directory: %1").arg(destDir);
+            return false;
+        }
+    }
+
+    QFileInfoList entries = src.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo& entry : entries) {
+        QString srcPath = entry.absoluteFilePath();
+        QString destPath = destDir + "/" + entry.fileName();
+
+        if (entry.isDir()) {
+            if (!copyDirectoryContents(srcPath, destPath, errorMsg)) {
+                return false;
+            }
+        } else {
+            if (QFile::exists(destPath)) {
+                if (!QFile::remove(destPath)) {
+                    errorMsg = QString("Failed to remove existing file: %1").arg(destPath);
+                    return false;
+                }
+            }
+            if (!QFile::copy(srcPath, destPath)) {
+                errorMsg = QString("Failed to copy file from %1 to %2").arg(srcPath, destPath);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString& outputDir, QString& errorMsg)
 {
     lgx_package_t pkg = lgx_load(lgxPath.toUtf8().constData());
@@ -921,16 +950,39 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
         lgx_free_package(pkg);
         return false;
     }
-    
+
+    // Write manifest.json into the extracted variant directory
+    QJsonObject manifest;
+    const char* name = lgx_get_name(pkg);
+    const char* version = lgx_get_version(pkg);
+    const char* description = lgx_get_description(pkg);
+    if (name) manifest["name"] = QString::fromUtf8(name);
+    if (version) manifest["version"] = QString::fromUtf8(version);
+    if (description) manifest["description"] = QString::fromUtf8(description);
+
+    QString variantOutputDir = outputDir + "/" + matchedVariant;
+    QString manifestPath = variantOutputDir + "/manifest.json";
+    QFile manifestFile(manifestPath);
+    if (manifestFile.open(QIODevice::WriteOnly)) {
+        QJsonDocument manifestDoc(manifest);
+        manifestFile.write(manifestDoc.toJson(QJsonDocument::Indented));
+        manifestFile.close();
+        qDebug() << "Wrote manifest.json to:" << manifestPath;
+    } else {
+        qWarning() << "Failed to write manifest.json to:" << manifestPath;
+    }
+
     lgx_free_package(pkg);
     return true;
 }
 
 bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& errorMsg)
 {
+    Q_UNUSED(isCoreModule);
+
     QStringList variants = platformVariantsToTry();
     QString variantDir;
-    
+
     for (const QString& v : variants) {
         QString candidate = extractedDir + "/" + v;
         if (QDir(candidate).exists()) {
@@ -939,12 +991,13 @@ bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, co
             break;
         }
     }
-    
+
     if (variantDir.isEmpty()) {
         errorMsg = QString("Extracted variant directory not found for: %1").arg(variants.join(", "));
         return false;
     }
-    
+
+    // Find the main library file to determine the module name
     QDir dir(variantDir);
     QStringList filters;
 #if defined(Q_OS_MAC)
@@ -954,44 +1007,25 @@ bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, co
 #else
     filters << "*.so";
 #endif
-    
+
     QFileInfoList libraryFiles = dir.entryInfoList(filters, QDir::Files, QDir::Name);
-    
+
     if (libraryFiles.isEmpty()) {
         errorMsg = QString("No library files found in extracted variant directory: %1").arg(variantDir);
         return false;
     }
-    
-    for (const QFileInfo& fileInfo : libraryFiles) {
-        QString sourceFile = fileInfo.absoluteFilePath();
-        QString targetPath;
-        
-        if (isCoreModule) {
-            // Core modules: flat structure (unchanged)
-            targetPath = targetDir + "/" + fileInfo.fileName();
-        } else {
-            // UI plugins: subdirectory structure
-            QString pluginName = fileInfo.completeBaseName();
-            QString pluginSubDir = targetDir + "/" + pluginName;
-            QDir().mkpath(pluginSubDir);
-            targetPath = pluginSubDir + "/" + fileInfo.fileName();
-        }
-        
-        if (QFile::exists(targetPath)) {
-            if (!QFile::remove(targetPath)) {
-                errorMsg = QString("Failed to remove existing file: %1").arg(targetPath);
-                return false;
-            }
-        }
-        
-        if (!QFile::copy(sourceFile, targetPath)) {
-            errorMsg = QString("Failed to copy library from %1 to %2").arg(sourceFile, targetPath);
-            return false;
-        }
-        
-        qDebug() << "Copied library file:" << targetPath;
+
+    // Use the first library's base name as the module name
+    QString moduleName = libraryFiles.first().completeBaseName();
+    QString moduleSubDir = targetDir + "/" + moduleName;
+
+    qDebug() << "Installing module" << moduleName << "to subdirectory:" << moduleSubDir;
+
+    if (!copyDirectoryContents(variantDir, moduleSubDir, errorMsg)) {
+        return false;
     }
-    
+
+    qDebug() << "Copied variant directory contents to:" << moduleSubDir;
     return true;
 }
 

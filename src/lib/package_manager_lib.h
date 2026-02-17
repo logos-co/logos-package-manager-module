@@ -88,4 +88,6 @@ private:
     QStringList resolveDependenciesRecursive(const QString& packageName, const QJsonArray& allPackages, QSet<QString>& processed);
     QJsonArray filterPackagesByCategory(const QJsonArray& packages, const QString& category);
     QStringList extractCategories(const QJsonArray& packages);
+
+    static bool copyDirectoryContents(const QString& srcDir, const QString& destDir, QString& errorMsg);
 };
