@@ -178,8 +178,6 @@ QJsonArray PackageManagerLib::getPackages()
     if (modulesDirPath.isEmpty()) {
         modulesDirPath = QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules");
     }
-    QDir modulesDir(modulesDirPath);
-    bool checkModulesInstalled = modulesDir.exists();
 
     QString pluginsDirPath = m_uiPluginsDirectory;
     if (pluginsDirPath.isEmpty()) {
@@ -187,8 +185,46 @@ QJsonArray PackageManagerLib::getPackages()
         modulesDirObj.cdUp();
         pluginsDirPath = modulesDirObj.filePath("plugins");
     }
-    QDir pluginsDir(pluginsDirPath);
-    bool checkPluginsInstalled = pluginsDir.exists();
+
+    // Build a set of installed module names by scanning subdirectories
+    // and reading the "name" field from each manifest.json
+    QSet<QString> installedModuleNames;
+
+    auto scanInstalledModules = [&](const QString& dirPath) {
+        QDir dir(dirPath);
+        if (!dir.exists()) return;
+        QStringList subdirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString& subdir : subdirs) {
+            QString manifestPath = dirPath + "/" + subdir + "/manifest.json";
+            QFile manifestFile(manifestPath);
+            if (manifestFile.open(QIODevice::ReadOnly)) {
+                QJsonDocument doc = QJsonDocument::fromJson(manifestFile.readAll());
+                manifestFile.close();
+                if (doc.isObject()) {
+                    QString name = doc.object().value("name").toString();
+                    if (!name.isEmpty()) {
+                        installedModuleNames.insert(name);
+                    }
+                }
+            }
+            // Also check for QML plugins (metadata.json with pluginType)
+            QString metadataPath = dirPath + "/" + subdir + "/metadata.json";
+            if (metadataPath != manifestPath) {
+                QFile metadataFile(metadataPath);
+                if (metadataFile.open(QIODevice::ReadOnly)) {
+                    QJsonDocument doc = QJsonDocument::fromJson(metadataFile.readAll());
+                    metadataFile.close();
+                    if (doc.isObject()) {
+                        // For QML plugins, use the directory name as the module name
+                        installedModuleNames.insert(subdir);
+                    }
+                }
+            }
+        }
+    };
+
+    scanInstalledModules(modulesDirPath);
+    scanInstalledModules(pluginsDirPath);
 
     for (const QJsonValue& packageVal : onlinePackages) {
         QJsonObject packageObj = packageVal.toObject();
@@ -196,33 +232,13 @@ QJsonArray PackageManagerLib::getPackages()
         QString packageType = packageObj.value("type").toString();
         QString packageFile = packageObj.value("package").toString();
         QString moduleName = packageObj.value("moduleName").toString();
-        
+
         if (packageFile.isEmpty()) {
             qWarning() << "Package" << packageName << "has no package file specified";
             continue;
         }
 
-        bool isInstalled = false;
-        bool isCoreModule = (packageType != "ui");
-
-        QString libExtension;
-#if defined(Q_OS_MAC)
-        libExtension = ".dylib";
-#elif defined(Q_OS_WIN)
-        libExtension = ".dll";
-#else
-        libExtension = ".so";
-#endif
-
-        if (isCoreModule && checkModulesInstalled) {
-            // Core modules: check subdirectory modules/<moduleName>/<moduleName>.<ext>
-            QString modulePath = modulesDirPath + "/" + moduleName + "/" + moduleName + libExtension;
-            isInstalled = QFile::exists(modulePath);
-        } else if (!isCoreModule && checkPluginsInstalled) {
-            // UI plugins: check in subdirectory plugins/<moduleName>/<moduleName>.<ext>
-            QString pluginPath = pluginsDirPath + "/" + moduleName + "/" + moduleName + libExtension;
-            isInstalled = QFile::exists(pluginPath);
-        }
+        bool isInstalled = installedModuleNames.contains(moduleName);
 
         QJsonObject resultPackage;
         resultPackage["name"] = packageName;
