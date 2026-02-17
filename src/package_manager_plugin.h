@@ -19,7 +19,6 @@ public:
     ~PackageManagerPlugin();
 
     Q_INVOKABLE bool installPlugin(const QString& pluginPath) override;
-    bool installPlugin(const QString& pluginPath, bool isCoreModule);
     QString name() const override { return "package_manager"; }
     QString version() const override { return "1.0.0"; }
     Q_INVOKABLE QJsonArray getPackages();

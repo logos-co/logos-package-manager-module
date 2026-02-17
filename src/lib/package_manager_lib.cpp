@@ -42,15 +42,60 @@ void PackageManagerLib::setUiPluginsDirectory(const QString& uiPluginsDirectory)
     qDebug() << "Set UI plugins directory to:" << m_uiPluginsDirectory;
 }
 
-QString PackageManagerLib::installPluginFile(const QString& pluginPath, bool isCoreModule, QString& errorMsg)
+QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString& errorMsg)
 {
-    qDebug() << "PackageManagerLib: Installing plugin file:" << pluginPath << "(isCoreModule:" << isCoreModule << ")";
+    qDebug() << "PackageManagerLib: Installing plugin file:" << pluginPath;
 
     QFileInfo sourceFileInfo(pluginPath);
     if (!sourceFileInfo.exists() || !sourceFileInfo.isFile()) {
         errorMsg = "Source plugin file does not exist or is not a file: " + pluginPath;
         qWarning() << errorMsg;
         return QString();
+    }
+
+    if (sourceFileInfo.suffix().toLower() != "lgx") {
+        errorMsg = "Only LGX packages are supported. Got: " + sourceFileInfo.suffix();
+        qWarning() << errorMsg;
+        return QString();
+    }
+
+    qDebug() << "Installing LGX package:" << pluginPath;
+    QTemporaryDir tempDir;
+    if (!tempDir.isValid()) {
+        errorMsg = "Failed to create temporary directory for LGX extraction";
+        qWarning() << errorMsg;
+        return QString();
+    }
+
+    if (!extractLgxPackage(pluginPath, tempDir.path(), errorMsg)) {
+        qWarning() << "Failed to extract LGX package:" << errorMsg;
+        return QString();
+    }
+
+    // Auto-detect module type from manifest.json in the extracted variant directory
+    QStringList variants = platformVariantsToTry();
+    QString variantDir;
+    for (const QString& v : variants) {
+        QString candidate = tempDir.path() + "/" + v;
+        if (QDir(candidate).exists()) {
+            variantDir = candidate;
+            break;
+        }
+    }
+
+    bool isCoreModule = true; // default to core module
+    if (!variantDir.isEmpty()) {
+        QString manifestPath = variantDir + "/manifest.json";
+        QFile manifestFile(manifestPath);
+        if (manifestFile.open(QIODevice::ReadOnly)) {
+            QJsonDocument doc = QJsonDocument::fromJson(manifestFile.readAll());
+            manifestFile.close();
+            if (doc.isObject()) {
+                QString type = doc.object().value("type").toString();
+                isCoreModule = (type != "ui");
+                qDebug() << "Auto-detected module type from manifest.json:" << type << "(isCoreModule:" << isCoreModule << ")";
+            }
+        }
     }
 
     QString pluginsDirectory;
@@ -87,139 +132,36 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, bool isC
         }
     }
 
-    if (sourceFileInfo.suffix().toLower() == "lgx") {
-        qDebug() << "Installing LGX package:" << pluginPath;
-        QTemporaryDir tempDir;
-        if (!tempDir.isValid()) {
-            errorMsg = "Failed to create temporary directory for LGX extraction";
-            qWarning() << errorMsg;
-            return QString();
-        }
-        
-        if (!extractLgxPackage(pluginPath, tempDir.path(), errorMsg)) {
-            qWarning() << "Failed to extract LGX package:" << errorMsg;
-            return QString();
-        }
-        
-        if (!copyLibraryFromExtracted(tempDir.path(), pluginsDirectory, isCoreModule, errorMsg)) {
-            qWarning() << "Failed to copy libraries from extracted LGX package:" << errorMsg;
-            return QString();
-        }
-        
-        qDebug() << "Successfully installed plugin from LGX package to:" << pluginsDirectory;
-        
-        // Emit signal for each installed library file
-        QString libExtension;
-#if defined(Q_OS_MAC)
-        libExtension = ".dylib";
-#elif defined(Q_OS_WIN)
-        libExtension = ".dll";
-#else
-        libExtension = ".so";
-#endif
-
-        // Both core modules and UI plugins use subdirectory structure
-        {
-            QDir dir(pluginsDirectory);
-            QStringList subdirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-            for (const QString& subdir : subdirs) {
-                QString libPath = pluginsDirectory + "/" + subdir + "/" + subdir + libExtension;
-                if (QFile::exists(libPath)) {
-                    emit pluginFileInstalled(libPath, isCoreModule);
-                }
-            }
-        }
-        
-        return pluginsDirectory;
-    }
-
-    QString fileName = sourceFileInfo.fileName();
-    QString destinationPath;
-    QDir destDir;
-    
-    if (isCoreModule) {
-        // Core modules: flat structure
-        destinationPath = pluginsDir.filePath(fileName);
-        destDir = pluginsDir;
-    } else {
-        // UI plugins: subdirectory structure
-        QString pluginName = sourceFileInfo.completeBaseName();
-        QString pluginSubDir = pluginsDirectory + "/" + pluginName;
-        QDir().mkpath(pluginSubDir);
-        destinationPath = pluginSubDir + "/" + fileName;
-        destDir = QDir(pluginSubDir);
-    }
-
-    QFileInfo destFileInfo(destinationPath);
-    if (destFileInfo.exists()) {
-        qDebug() << "Plugin already exists at destination. Overwriting:" << destinationPath;
-        QFile destFile(destinationPath);
-        if (!destFile.remove()) {
-            errorMsg = "Failed to remove existing plugin file: " + destinationPath;
-            qWarning() << errorMsg;
-            return QString();
-        }
-    }
-
-    QFile sourceFile(pluginPath);
-    if (!sourceFile.copy(destinationPath)) {
-        errorMsg = "Failed to copy plugin file to plugins directory: " + sourceFile.errorString();
-        qWarning() << errorMsg;
+    if (!copyLibraryFromExtracted(tempDir.path(), pluginsDirectory, isCoreModule, errorMsg)) {
+        qWarning() << "Failed to copy libraries from extracted LGX package:" << errorMsg;
         return QString();
     }
 
-    qDebug() << "Successfully installed plugin:" << fileName << "to" << destinationPath;
-    
-    QPluginLoader loader(pluginPath);
-    QJsonObject metadata = loader.metaData();
-    if (!metadata.isEmpty()) {
-        QJsonObject metaDataObj = metadata.value("MetaData").toObject();
-        QJsonArray includeFiles = metaDataObj.value("include").toArray();
-        
-        if (!includeFiles.isEmpty()) {
-            qDebug() << "Plugin has" << includeFiles.size() << "included files to copy";
-            
-            QDir sourceDir = sourceFileInfo.dir();
-            
-            for (const QJsonValue& includeVal : includeFiles) {
-                QString includeFileName = includeVal.toString();
-                if (includeFileName.isEmpty()) continue;
-                
-                QString sourceIncludePath = sourceDir.filePath(includeFileName);
-                QString destIncludePath = destDir.filePath(includeFileName);
-                
-                qDebug() << "Checking for included file:" << sourceIncludePath;
-                
-                QFileInfo includeFileInfo(sourceIncludePath);
-                if (includeFileInfo.exists() && includeFileInfo.isFile()) {
-                    qDebug() << "Found included file:" << sourceIncludePath;
-                    
-                    QFileInfo destIncludeFileInfo(destIncludePath);
-                    if (destIncludeFileInfo.exists()) {
-                        qDebug() << "Included file already exists at destination. Overwriting:" << destIncludePath;
-                        QFile destIncludeFile(destIncludePath);
-                        if (!destIncludeFile.remove()) {
-                            qWarning() << "Failed to remove existing included file:" << destIncludePath;
-                        }
-                    }
-                    
-                    QFile includeFile(sourceIncludePath);
-                    if (includeFile.copy(destIncludePath)) {
-                        qDebug() << "Successfully copied included file:" << includeFileName;
-                    } else {
-                        qWarning() << "Failed to copy included file:" << includeFileName 
-                                  << "-" << includeFile.errorString();
-                    }
-                } else {
-                    qDebug() << "Included file not found:" << sourceIncludePath;
-                }
+    qDebug() << "Successfully installed plugin from LGX package to:" << pluginsDirectory;
+
+    // Emit signal for each installed library file
+    QString libExtension;
+#if defined(Q_OS_MAC)
+    libExtension = ".dylib";
+#elif defined(Q_OS_WIN)
+    libExtension = ".dll";
+#else
+    libExtension = ".so";
+#endif
+
+    // Both core modules and UI plugins use subdirectory structure
+    {
+        QDir dir(pluginsDirectory);
+        QStringList subdirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString& subdir : subdirs) {
+            QString libPath = pluginsDirectory + "/" + subdir + "/" + subdir + libExtension;
+            if (QFile::exists(libPath)) {
+                emit pluginFileInstalled(libPath, isCoreModule);
             }
         }
     }
-    
-    emit pluginFileInstalled(destinationPath, isCoreModule);
-    
-    return destinationPath;
+
+    return pluginsDirectory;
 }
 
 QJsonArray PackageManagerLib::getPackages()
@@ -378,44 +320,32 @@ bool PackageManagerLib::installPackage(const QString& packageName)
         return false;
     }
     
-    QString packageType = packageObj.value("type").toString();
-    bool isCoreModule = (packageType != "ui");
-    
-    if (!isCoreModule && m_uiPluginsDirectory.isEmpty()) {
-        QDir modulesDir(m_pluginsDirectory.isEmpty() 
-            ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
-            : m_pluginsDirectory);
-        modulesDir.cdUp();
-        m_uiPluginsDirectory = modulesDir.filePath("plugins");
-        qDebug() << "Auto-derived UI plugins directory:" << m_uiPluginsDirectory;
-    }
-    
     QString packageFile = packageObj.value("package").toString();
     if (packageFile.isEmpty()) {
         qWarning() << "Package" << packageName << "has no package file specified";
         return false;
     }
-    
+
     QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     if (tempDir.isEmpty()) {
         qWarning() << "Failed to get temp directory";
         return false;
     }
-    
+
     // Download the LGX package file
     QString downloadUrl = QString("%1/%2").arg(MODULES_DOWNLOAD_BASE_URL, packageFile);
     QString destinationPath = QDir(tempDir).filePath(packageFile);
-    
+
     qDebug() << "Downloading package file:" << packageFile;
     if (!downloadFile(downloadUrl, destinationPath)) {
         qWarning() << "Failed to download package file:" << packageFile;
         return false;
     }
-    
-    // Install the LGX package (installPluginFile handles LGX extraction)
-    qDebug() << "Installing downloaded package:" << destinationPath << "(type:" << packageType << ")";
+
+    // Install the LGX package (installPluginFile handles LGX extraction and type detection)
+    qDebug() << "Installing downloaded package:" << destinationPath;
     QString errorMsg;
-    QString installedPath = installPluginFile(destinationPath, isCoreModule, errorMsg);
+    QString installedPath = installPluginFile(destinationPath, errorMsg);
     
     // Clean up temp file
     QFile::remove(destinationPath);
@@ -426,7 +356,7 @@ bool PackageManagerLib::installPackage(const QString& packageName)
         return false;
     }
     
-    qDebug() << "Successfully installed package:" << packageName << "(type:" << packageType << ")";
+    qDebug() << "Successfully installed package:" << packageName;
     return true;
 }
 
@@ -549,19 +479,7 @@ void PackageManagerLib::onPackageListFetched()
         finishAsyncInstallation(false, "Package not found: " + m_asyncState.packageName);
         return;
     }
-    
-    QString packageType = m_asyncState.packageObj.value("type").toString();
-    m_asyncState.isCoreModule = (packageType != "ui");
-    
-    if (!m_asyncState.isCoreModule && m_uiPluginsDirectory.isEmpty()) {
-        QDir modulesDir(m_pluginsDirectory.isEmpty() 
-            ? QDir::cleanPath(QCoreApplication::applicationDirPath() + "/bin/modules")
-            : m_pluginsDirectory);
-        modulesDir.cdUp();
-        m_uiPluginsDirectory = modulesDir.filePath("plugins");
-        qDebug() << "Auto-derived UI plugins directory:" << m_uiPluginsDirectory;
-    }
-    
+
     QString packageFile = m_asyncState.packageObj.value("package").toString();
     if (packageFile.isEmpty()) {
         finishAsyncInstallation(false, "Package has no package file specified");
@@ -582,12 +500,11 @@ void PackageManagerLib::startNextFileDownload()
         qDebug() << "Async: All files downloaded, installing...";
         
         bool allInstalled = true;
-        QString packageType = m_asyncState.packageObj.value("type").toString();
-        
+
         for (const QString& downloadedFile : m_asyncState.downloadedFiles) {
-            qDebug() << "Installing downloaded file:" << downloadedFile << "(type:" << packageType << ")";
+            qDebug() << "Installing downloaded file:" << downloadedFile;
             QString errorMsg;
-            QString installedPath = installPluginFile(downloadedFile, m_asyncState.isCoreModule, errorMsg);
+            QString installedPath = installPluginFile(downloadedFile, errorMsg);
             if (installedPath.isEmpty()) {
                 qWarning() << "Failed to install file:" << downloadedFile << "-" << errorMsg;
                 allInstalled = false;
@@ -951,8 +868,23 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
         return false;
     }
 
-    // Write manifest.json into the extracted variant directory
+    // Merge LGX metadata into manifest.json in the extracted variant directory,
+    // preserving any existing fields (e.g. "type") from the package's own manifest.
+    QString variantOutputDir = outputDir + "/" + matchedVariant;
+    QString manifestPath = variantOutputDir + "/manifest.json";
+
     QJsonObject manifest;
+    {
+        QFile existingManifest(manifestPath);
+        if (existingManifest.open(QIODevice::ReadOnly)) {
+            QJsonDocument existingDoc = QJsonDocument::fromJson(existingManifest.readAll());
+            if (existingDoc.isObject()) {
+                manifest = existingDoc.object();
+            }
+            existingManifest.close();
+        }
+    }
+
     const char* name = lgx_get_name(pkg);
     const char* version = lgx_get_version(pkg);
     const char* description = lgx_get_description(pkg);
@@ -960,8 +892,6 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
     if (version) manifest["version"] = QString::fromUtf8(version);
     if (description) manifest["description"] = QString::fromUtf8(description);
 
-    QString variantOutputDir = outputDir + "/" + matchedVariant;
-    QString manifestPath = variantOutputDir + "/manifest.json";
     QFile manifestFile(manifestPath);
     if (manifestFile.open(QIODevice::WriteOnly)) {
         QJsonDocument manifestDoc(manifest);

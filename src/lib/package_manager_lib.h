@@ -22,7 +22,7 @@ public:
     QString pluginsDirectory() const { return m_pluginsDirectory; }
     QString uiPluginsDirectory() const { return m_uiPluginsDirectory; }
 
-    QString installPluginFile(const QString& pluginPath, bool isCoreModule, QString& errorMsg);
+    QString installPluginFile(const QString& pluginPath, QString& errorMsg);
     
     QJsonArray getPackages();
     
@@ -70,7 +70,6 @@ private:
         QStringList filesToDownload;
         QStringList downloadedFiles;
         int currentDownloadIndex;
-        bool isCoreModule;
         QString tempDir;
         QStringList packageQueue;
         int currentPackageIndex;

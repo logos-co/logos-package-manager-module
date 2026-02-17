@@ -27,13 +27,8 @@ PackageManagerPlugin::~PackageManagerPlugin()
 
 bool PackageManagerPlugin::installPlugin(const QString& pluginPath)
 {
-    return installPlugin(pluginPath, true);
-}
-
-bool PackageManagerPlugin::installPlugin(const QString& pluginPath, bool isCoreModule)
-{
     QString errorMsg;
-    QString installedPath = m_lib->installPluginFile(pluginPath, isCoreModule, errorMsg);
+    QString installedPath = m_lib->installPluginFile(pluginPath, errorMsg);
     return !installedPath.isEmpty();
 }
 
