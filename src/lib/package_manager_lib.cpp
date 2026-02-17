@@ -867,6 +867,25 @@ QString PackageManagerLib::currentPlatformVariant() const
 #endif
 }
 
+QStringList PackageManagerLib::platformVariantsToTry() const
+{
+    QString primary = currentPlatformVariant();
+    QStringList variants;
+    variants << primary;
+    
+    if (primary == "linux-x86_64") {
+        variants << "linux-amd64";
+    } else if (primary == "linux-amd64") {
+        variants << "linux-x86_64";
+    } else if (primary == "linux-arm64") {
+        variants << "linux-aarch64";
+    } else if (primary == "linux-aarch64") {
+        variants << "linux-arm64";
+    }
+    
+    return variants;
+}
+
 bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString& outputDir, QString& errorMsg)
 {
     lgx_package_t pkg = lgx_load(lgxPath.toUtf8().constData());
@@ -875,16 +894,27 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
         return false;
     }
     
-    QString variant = currentPlatformVariant();
-    qDebug() << "Extracting variant:" << variant << "from LGX package";
+    QStringList variants = platformVariantsToTry();
+    QString matchedVariant;
     
-    if (!lgx_has_variant(pkg, variant.toUtf8().constData())) {
-        errorMsg = QString("Package does not contain variant for platform: %1").arg(variant);
+    qDebug() << "Trying platform variants:" << variants;
+    
+    for (const QString& v : variants) {
+        if (lgx_has_variant(pkg, v.toUtf8().constData())) {
+            matchedVariant = v;
+            qDebug() << "Found matching variant:" << matchedVariant;
+            break;
+        }
+    }
+    
+    if (matchedVariant.isEmpty()) {
+        errorMsg = QString("Package does not contain variant for platform: %1 (tried: %2)")
+            .arg(variants.first(), variants.join(", "));
         lgx_free_package(pkg);
         return false;
     }
     
-    lgx_result_t result = lgx_extract(pkg, variant.toUtf8().constData(), outputDir.toUtf8().constData());
+    lgx_result_t result = lgx_extract(pkg, matchedVariant.toUtf8().constData(), outputDir.toUtf8().constData());
     
     if (!result.success) {
         errorMsg = QString("Failed to extract variant: %1").arg(result.error ? result.error : "unknown error");
@@ -898,11 +928,20 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
 
 bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& errorMsg)
 {
-    QString variant = currentPlatformVariant();
-    QString variantDir = extractedDir + "/" + variant;
+    QStringList variants = platformVariantsToTry();
+    QString variantDir;
     
-    if (!QDir(variantDir).exists()) {
-        errorMsg = QString("Extracted variant directory not found: %1").arg(variantDir);
+    for (const QString& v : variants) {
+        QString candidate = extractedDir + "/" + v;
+        if (QDir(candidate).exists()) {
+            variantDir = candidate;
+            qDebug() << "Found extracted variant directory:" << variantDir;
+            break;
+        }
+    }
+    
+    if (variantDir.isEmpty()) {
+        errorMsg = QString("Extracted variant directory not found for: %1").arg(variants.join(", "));
         return false;
     }
     

@@ -45,6 +45,7 @@ public:
     
     QJsonObject findPackageByName(const QJsonArray& packages, const QString& packageName);
     QString currentPlatformVariant() const;
+    QStringList platformVariantsToTry() const;
     
     bool extractLgxPackage(const QString& lgxPath, const QString& outputDir, QString& errorMsg);
     bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& errorMsg);
