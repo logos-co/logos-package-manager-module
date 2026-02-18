@@ -83,7 +83,8 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString&
         }
     }
 
-    bool isCoreModule = true; // default to core module
+    // Determine module type from manifest.json "type" field
+    QString detectedType;
     if (!variantDir.isEmpty()) {
         QString manifestPath = variantDir + "/manifest.json";
         QFile manifestFile(manifestPath);
@@ -91,12 +92,12 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString&
             QJsonDocument doc = QJsonDocument::fromJson(manifestFile.readAll());
             manifestFile.close();
             if (doc.isObject()) {
-                QString type = doc.object().value("type").toString();
-                isCoreModule = (type != "ui");
-                qDebug() << "Auto-detected module type from manifest.json:" << type << "(isCoreModule:" << isCoreModule << ")";
+                detectedType = doc.object().value("type").toString();
             }
         }
     }
+    bool isCoreModule = (detectedType != "ui");
+    qDebug() << "Module type:" << detectedType << "(isCoreModule:" << isCoreModule << ")";
 
     QString pluginsDirectory;
     if (isCoreModule) {
@@ -358,7 +359,6 @@ bool PackageManagerLib::installPackage(const QString& packageName)
         return false;
     }
 
-    // Install the LGX package (installPluginFile handles LGX extraction and type detection)
     qDebug() << "Installing downloaded package:" << destinationPath;
     QString errorMsg;
     QString installedPath = installPluginFile(destinationPath, errorMsg);
@@ -884,38 +884,23 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
         return false;
     }
 
-    // Merge LGX metadata into manifest.json in the extracted variant directory,
-    // preserving any existing fields (e.g. "type") from the package's own manifest.
+    // Write the full root manifest.json from the LGX package into the extracted
+    // variant directory so all metadata (type, category, dependencies, etc.) is preserved.
     QString variantOutputDir = outputDir + "/" + matchedVariant;
     QString manifestPath = variantOutputDir + "/manifest.json";
 
-    QJsonObject manifest;
-    {
-        QFile existingManifest(manifestPath);
-        if (existingManifest.open(QIODevice::ReadOnly)) {
-            QJsonDocument existingDoc = QJsonDocument::fromJson(existingManifest.readAll());
-            if (existingDoc.isObject()) {
-                manifest = existingDoc.object();
-            }
-            existingManifest.close();
+    const char* manifestJson = lgx_get_manifest_json(pkg);
+    if (manifestJson) {
+        QFile manifestFile(manifestPath);
+        if (manifestFile.open(QIODevice::WriteOnly)) {
+            manifestFile.write(QByteArray(manifestJson));
+            manifestFile.close();
+            qDebug() << "Wrote root manifest.json to:" << manifestPath;
+        } else {
+            qWarning() << "Failed to write manifest.json to:" << manifestPath;
         }
-    }
-
-    const char* name = lgx_get_name(pkg);
-    const char* version = lgx_get_version(pkg);
-    const char* description = lgx_get_description(pkg);
-    if (name) manifest["name"] = QString::fromUtf8(name);
-    if (version) manifest["version"] = QString::fromUtf8(version);
-    if (description) manifest["description"] = QString::fromUtf8(description);
-
-    QFile manifestFile(manifestPath);
-    if (manifestFile.open(QIODevice::WriteOnly)) {
-        QJsonDocument manifestDoc(manifest);
-        manifestFile.write(manifestDoc.toJson(QJsonDocument::Indented));
-        manifestFile.close();
-        qDebug() << "Wrote manifest.json to:" << manifestPath;
     } else {
-        qWarning() << "Failed to write manifest.json to:" << manifestPath;
+        qWarning() << "Failed to get manifest JSON from LGX package";
     }
 
     lgx_free_package(pkg);
