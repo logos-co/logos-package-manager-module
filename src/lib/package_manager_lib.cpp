@@ -133,14 +133,15 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString&
         }
     }
 
-    if (!copyLibraryFromExtracted(tempDir.path(), pluginsDirectory, isCoreModule, errorMsg)) {
+    QString installedModuleName;
+    if (!copyLibraryFromExtracted(tempDir.path(), pluginsDirectory, isCoreModule, installedModuleName, errorMsg)) {
         qWarning() << "Failed to copy libraries from extracted LGX package:" << errorMsg;
         return QString();
     }
 
     qDebug() << "Successfully installed plugin from LGX package to:" << pluginsDirectory;
 
-    // Emit signal for each installed library file
+    // Emit signal for the installed library using manifest's main field for the correct filename
     QString libExtension;
 #if defined(Q_OS_MAC)
     libExtension = ".dylib";
@@ -150,15 +151,30 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString&
     libExtension = ".so";
 #endif
 
-    // Both core modules and UI plugins use subdirectory structure
     {
-        QDir dir(pluginsDirectory);
-        QStringList subdirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-        for (const QString& subdir : subdirs) {
-            QString libPath = pluginsDirectory + "/" + subdir + "/" + subdir + libExtension;
-            if (QFile::exists(libPath)) {
-                emit pluginFileInstalled(libPath, isCoreModule);
+        QString installedManifestPath = pluginsDirectory + "/" + installedModuleName + "/manifest.json";
+        QString mainLibFile;
+        QFile installedMf(installedManifestPath);
+        if (installedMf.open(QIODevice::ReadOnly)) {
+            QJsonDocument doc = QJsonDocument::fromJson(installedMf.readAll());
+            installedMf.close();
+            if (doc.isObject()) {
+                QJsonObject mainObj = doc.object().value("main").toObject();
+                for (const QString& v : platformVariantsToTry()) {
+                    mainLibFile = mainObj.value(v).toString();
+                    if (!mainLibFile.isEmpty())
+                        break;
+                }
             }
+        }
+        if (mainLibFile.isEmpty()) {
+            mainLibFile = installedModuleName + libExtension;
+        }
+        QString libPath = pluginsDirectory + "/" + installedModuleName + "/" + mainLibFile;
+        if (QFile::exists(libPath)) {
+            emit pluginFileInstalled(libPath, isCoreModule);
+        } else {
+            qWarning() << "Installed main library not found at expected path:" << libPath;
         }
     }
 
@@ -907,7 +923,7 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
     return true;
 }
 
-bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& errorMsg)
+bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& outModuleName, QString& errorMsg)
 {
     Q_UNUSED(isCoreModule);
 
@@ -928,26 +944,39 @@ bool PackageManagerLib::copyLibraryFromExtracted(const QString& extractedDir, co
         return false;
     }
 
-    // Find the main library file to determine the module name
-    QDir dir(variantDir);
-    QStringList filters;
-#if defined(Q_OS_MAC)
-    filters << "*.dylib";
-#elif defined(Q_OS_WIN)
-    filters << "*.dll";
-#else
-    filters << "*.so";
-#endif
-
-    QFileInfoList libraryFiles = dir.entryInfoList(filters, QDir::Files, QDir::Name);
-
-    if (libraryFiles.isEmpty()) {
-        errorMsg = QString("No library files found in extracted variant directory: %1").arg(variantDir);
-        return false;
+    // Determine the module name from manifest.json "name" field
+    QString moduleName;
+    QString manifestPath = variantDir + "/manifest.json";
+    QFile manifestFile(manifestPath);
+    if (manifestFile.open(QIODevice::ReadOnly)) {
+        QJsonDocument doc = QJsonDocument::fromJson(manifestFile.readAll());
+        manifestFile.close();
+        if (doc.isObject()) {
+            moduleName = doc.object().value("name").toString();
+        }
     }
 
-    // Use the first library's base name as the module name
-    QString moduleName = libraryFiles.first().completeBaseName();
+    // Fall back to the first library file's base name if manifest name is unavailable
+    if (moduleName.isEmpty()) {
+        QDir dir(variantDir);
+        QStringList filters;
+#if defined(Q_OS_MAC)
+        filters << "*.dylib";
+#elif defined(Q_OS_WIN)
+        filters << "*.dll";
+#else
+        filters << "*.so";
+#endif
+        QFileInfoList libraryFiles = dir.entryInfoList(filters, QDir::Files, QDir::Name);
+        if (libraryFiles.isEmpty()) {
+            errorMsg = QString("No library files found and no name in manifest for: %1").arg(variantDir);
+            return false;
+        }
+        moduleName = libraryFiles.first().completeBaseName();
+        qWarning() << "Could not read module name from manifest, falling back to:" << moduleName;
+    }
+
+    outModuleName = moduleName;
     QString moduleSubDir = targetDir + "/" + moduleName;
 
     qDebug() << "Installing module" << moduleName << "to subdirectory:" << moduleSubDir;

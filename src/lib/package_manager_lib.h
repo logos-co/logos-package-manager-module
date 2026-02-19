@@ -48,7 +48,7 @@ public:
     QStringList platformVariantsToTry() const;
     
     bool extractLgxPackage(const QString& lgxPath, const QString& outputDir, QString& errorMsg);
-    bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& errorMsg);
+    bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& outModuleName, QString& errorMsg);
 
 signals:
     void pluginFileInstalled(const QString& pluginPath, bool isCoreModule);
