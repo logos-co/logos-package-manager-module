@@ -25,10 +25,10 @@ PackageManagerPlugin::~PackageManagerPlugin()
     }
 }
 
-bool PackageManagerPlugin::installPlugin(const QString& pluginPath)
+bool PackageManagerPlugin::installPlugin(const QString& pluginPath, bool skipIfNotNewerVersion)
 {
     QString errorMsg;
-    QString installedPath = m_lib->installPluginFile(pluginPath, errorMsg);
+    QString installedPath = m_lib->installPluginFile(pluginPath, errorMsg, skipIfNotNewerVersion);
     return !installedPath.isEmpty();
 }
 

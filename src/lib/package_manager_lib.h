@@ -22,7 +22,7 @@ public:
     QString pluginsDirectory() const { return m_pluginsDirectory; }
     QString uiPluginsDirectory() const { return m_uiPluginsDirectory; }
 
-    QString installPluginFile(const QString& pluginPath, QString& errorMsg);
+    QString installPluginFile(const QString& pluginPath, QString& errorMsg, bool skipIfNotNewerVersion = false);
     
     QJsonArray getPackages();
     

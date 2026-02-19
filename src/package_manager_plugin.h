@@ -18,7 +18,7 @@ public:
     PackageManagerPlugin();
     ~PackageManagerPlugin();
 
-    Q_INVOKABLE bool installPlugin(const QString& pluginPath) override;
+    Q_INVOKABLE bool installPlugin(const QString& pluginPath, bool skipIfNotNewerVersion = false) override;
     QString name() const override { return "package_manager"; }
     QString version() const override { return "1.0.0"; }
     Q_INVOKABLE QJsonArray getPackages();

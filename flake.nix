@@ -6,7 +6,7 @@
     nixpkgs.follows = "logos-liblogos/nixpkgs";
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
     logos-liblogos.url = "github:logos-co/logos-liblogos";
-    logos-package.url = "github:logos-co/logos-package/add-manifest-json-getter";
+    logos-package.url = "github:logos-co/logos-package";
   };
 
   outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-package }:

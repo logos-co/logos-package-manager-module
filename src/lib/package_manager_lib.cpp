@@ -16,6 +16,21 @@
 
 static const QString MODULES_DOWNLOAD_BASE_URL = QStringLiteral("https://github.com/logos-co/logos-modules/releases/latest/download");
 
+// Returns true if version string `a` is >= `b`, comparing dot-separated numeric segments.
+static bool versionGreaterOrEqual(const QString& a, const QString& b)
+{
+    QStringList ap = a.split('.');
+    QStringList bp = b.split('.');
+    int len = qMax(ap.size(), bp.size());
+    for (int i = 0; i < len; ++i) {
+        int av = i < ap.size() ? ap[i].toInt() : 0;
+        int bv = i < bp.size() ? bp[i].toInt() : 0;
+        if (av != bv)
+            return av > bv;
+    }
+    return true; // equal
+}
+
 PackageManagerLib::PackageManagerLib(QObject* parent)
     : QObject(parent)
     , m_networkManager(nullptr)
@@ -42,7 +57,7 @@ void PackageManagerLib::setUiPluginsDirectory(const QString& uiPluginsDirectory)
     qDebug() << "Set UI plugins directory to:" << m_uiPluginsDirectory;
 }
 
-QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString& errorMsg)
+QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString& errorMsg, bool skipIfNotNewerVersion)
 {
     qDebug() << "PackageManagerLib: Installing plugin file:" << pluginPath;
 
@@ -57,6 +72,39 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString&
         errorMsg = "Only LGX packages are supported. Got: " + sourceFileInfo.suffix();
         qWarning() << errorMsg;
         return QString();
+    }
+
+    // If requested, skip installation when an equal-or-higher version is already present.
+    if (skipIfNotNewerVersion) {
+        lgx_package_t pkg = lgx_load(pluginPath.toUtf8().constData());
+        if (pkg) {
+            const char* rawName    = lgx_get_name(pkg);
+            const char* rawVersion = lgx_get_version(pkg);
+            QString incomingName    = rawName    ? QString::fromUtf8(rawName)    : QString();
+            QString incomingVersion = rawVersion ? QString::fromUtf8(rawVersion) : QString();
+            lgx_free_package(pkg);
+
+            if (!incomingName.isEmpty() && !incomingVersion.isEmpty()) {
+                for (const QString& baseDir : {m_pluginsDirectory, m_uiPluginsDirectory}) {
+                    if (baseDir.isEmpty())
+                        continue;
+                    QFile mf(baseDir + "/" + incomingName + "/manifest.json");
+                    if (mf.open(QIODevice::ReadOnly)) {
+                        QJsonDocument doc = QJsonDocument::fromJson(mf.readAll());
+                        mf.close();
+                        QString installedVersion = doc.object().value("version").toString();
+                        if (!installedVersion.isEmpty() && versionGreaterOrEqual(installedVersion, incomingVersion)) {
+                            qInfo() << "Skipping installation of" << incomingName
+                                    << "— already at version" << installedVersion;
+                            return QStringLiteral("skipped");
+                        }
+                    }
+                }
+            }
+        } else {
+            qWarning() << "skipIfNotNewerVersion: could not read lgx manifest for" << pluginPath
+                       << ":" << lgx_get_last_error();
+        }
     }
 
     qDebug() << "Installing LGX package:" << pluginPath;
