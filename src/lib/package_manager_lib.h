@@ -22,7 +22,7 @@ public:
     QString pluginsDirectory() const { return m_pluginsDirectory; }
     QString uiPluginsDirectory() const { return m_uiPluginsDirectory; }
 
-    QString installPluginFile(const QString& pluginPath, bool isCoreModule, QString& errorMsg);
+    QString installPluginFile(const QString& pluginPath, QString& errorMsg, bool skipIfNotNewerVersion = false);
     
     QJsonArray getPackages();
     
@@ -48,7 +48,7 @@ public:
     QStringList platformVariantsToTry() const;
     
     bool extractLgxPackage(const QString& lgxPath, const QString& outputDir, QString& errorMsg);
-    bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& errorMsg);
+    bool copyLibraryFromExtracted(const QString& extractedDir, const QString& targetDir, bool isCoreModule, QString& outModuleName, QString& errorMsg);
 
 signals:
     void pluginFileInstalled(const QString& pluginPath, bool isCoreModule);
@@ -70,7 +70,6 @@ private:
         QStringList filesToDownload;
         QStringList downloadedFiles;
         int currentDownloadIndex;
-        bool isCoreModule;
         QString tempDir;
         QStringList packageQueue;
         int currentPackageIndex;
@@ -88,4 +87,6 @@ private:
     QStringList resolveDependenciesRecursive(const QString& packageName, const QJsonArray& allPackages, QSet<QString>& processed);
     QJsonArray filterPackagesByCategory(const QJsonArray& packages, const QString& category);
     QStringList extractCategories(const QJsonArray& packages);
+
+    static bool copyDirectoryContents(const QString& srcDir, const QString& destDir, QString& errorMsg);
 };

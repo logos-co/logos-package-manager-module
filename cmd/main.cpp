@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QFile>
 #include <iostream>
 
 #include "package_manager_lib.h"
@@ -114,24 +115,46 @@ int cmdList(PackageManagerLib& pm, const QString& category, bool installedOnly, 
     return 0;
 }
 
+int cmdInstallFile(PackageManagerLib& pm, const QString& filePath) {
+    if (!QFile::exists(filePath)) {
+        err << "Error: file not found: " << filePath << Qt::endl;
+        return 1;
+    }
+
+    out << "Installing from file: " << filePath << "..." << Qt::flush;
+
+    QString errorMsg;
+    QString installedPath = pm.installPluginFile(filePath, errorMsg);
+
+    if (installedPath.isEmpty()) {
+        out << " FAILED" << Qt::endl;
+        err << "Error: " << errorMsg << Qt::endl;
+        return 1;
+    }
+
+    out << " done" << Qt::endl;
+    out << "Installed to: " << installedPath << Qt::endl;
+    return 0;
+}
+
 int cmdInstall(PackageManagerLib& pm, const QStringList& args) {
     if (args.isEmpty()) {
         err << "Error: install requires at least one package name" << Qt::endl;
         return 1;
     }
-    
+
     out << "Resolving dependencies..." << Qt::endl;
     QStringList packagesToInstall = pm.resolveDependencies(args);
-    
-    out << "Will install " << packagesToInstall.size() << " package(s): " 
+
+    out << "Will install " << packagesToInstall.size() << " package(s): "
         << packagesToInstall.join(", ") << Qt::endl << Qt::endl;
-    
+
     int installed = 0;
     int failed = 0;
-    
+
     for (const QString& packageName : packagesToInstall) {
         out << "Installing: " << packageName << "..." << Qt::flush;
-        
+
         if (pm.installPackage(packageName)) {
             out << " done" << Qt::endl;
             installed++;
@@ -140,7 +163,7 @@ int cmdInstall(PackageManagerLib& pm, const QStringList& args) {
             failed++;
         }
     }
-    
+
     out << Qt::endl;
     if (failed == 0) {
         out << "Done. " << installed << " package(s) installed successfully." << Qt::endl;
@@ -223,6 +246,7 @@ void printHelp() {
     out << "  search <query>          Search packages by name or description" << Qt::endl;
     out << "  list                    List all available packages" << Qt::endl;
     out << "  install <pkg> [pkgs...] Install one or more packages" << Qt::endl;
+    out << "  install --file <path>   Install from a local LGX file" << Qt::endl;
     out << "  categories              List available categories" << Qt::endl;
     out << "  info <package>          Show detailed package information" << Qt::endl;
     out << Qt::endl;
@@ -231,6 +255,7 @@ void printHelp() {
     out << "  --ui-plugins-dir <path> Set UI plugins directory" << Qt::endl;
     out << "  --category <cat>        Filter by category (for list command)" << Qt::endl;
     out << "  --installed             Show only installed packages (for list command)" << Qt::endl;
+    out << "  --file <path>           Install from a local LGX file (for install command)" << Qt::endl;
     out << "  --json                  Output in JSON format" << Qt::endl;
     out << "  -h, --help              Show this help message" << Qt::endl;
     out << "  -v, --version           Show version information" << Qt::endl;
@@ -252,7 +277,8 @@ int main(int argc, char *argv[]) {
     QCommandLineOption categoryOption("category", "Filter by category", "category");
     QCommandLineOption installedOption("installed", "Show only installed packages");
     QCommandLineOption jsonOption("json", "Output in JSON format");
-    
+    QCommandLineOption fileOption("file", "Install from a local LGX file path", "path");
+
     parser.addOption(helpOption);
     parser.addOption(versionOption);
     parser.addOption(pluginsDirOption);
@@ -260,6 +286,7 @@ int main(int argc, char *argv[]) {
     parser.addOption(categoryOption);
     parser.addOption(installedOption);
     parser.addOption(jsonOption);
+    parser.addOption(fileOption);
     parser.addPositionalArgument("command", "Command to run");
     parser.addPositionalArgument("args", "Command arguments", "[args...]");
     
@@ -302,6 +329,9 @@ int main(int argc, char *argv[]) {
         bool installedOnly = parser.isSet(installedOption);
         return cmdList(pm, category, installedOnly, jsonOutput);
     } else if (command == "install") {
+        if (parser.isSet(fileOption)) {
+            return cmdInstallFile(pm, parser.value(fileOption));
+        }
         return cmdInstall(pm, positionalArgs);
     } else if (command == "categories") {
         return cmdCategories(pm, jsonOutput);
