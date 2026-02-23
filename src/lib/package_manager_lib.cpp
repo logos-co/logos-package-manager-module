@@ -954,19 +954,32 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
     QString manifestPath = variantOutputDir + "/manifest.json";
 
     const char* manifestJson = lgx_get_manifest_json(pkg);
-    if (manifestJson) {
-        QFile manifestFile(manifestPath);
-        if (manifestFile.open(QIODevice::WriteOnly)) {
-            manifestFile.write(QByteArray(manifestJson));
-            manifestFile.close();
-            qDebug() << "Wrote root manifest.json to:" << manifestPath;
-        } else {
-            qWarning() << "Failed to write manifest.json to:" << manifestPath;
-        }
-    } else {
-        qWarning() << "Failed to get manifest JSON from LGX package";
+    if (!manifestJson) {
+        errorMsg = QString("Failed to get manifest JSON from LGX package: %1")
+            .arg(lgx_get_last_error());
+        qWarning() << errorMsg;
+        lgx_free_package(pkg);
+        return false;
     }
 
+    QFile manifestFile(manifestPath);
+    if (!manifestFile.open(QIODevice::WriteOnly)) {
+        errorMsg = QString("Failed to write manifest.json to: %1").arg(manifestPath);
+        qWarning() << errorMsg;
+        lgx_free_package(pkg);
+        return false;
+    }
+
+    if (manifestFile.write(QByteArray(manifestJson)) == -1) {
+        errorMsg = QString("Failed to write data to manifest.json at: %1").arg(manifestPath);
+        qWarning() << errorMsg;
+        manifestFile.close();
+        lgx_free_package(pkg);
+        return false;
+    }
+
+    manifestFile.close();
+    qDebug() << "Wrote root manifest.json to:" << manifestPath;
     lgx_free_package(pkg);
     return true;
 }
