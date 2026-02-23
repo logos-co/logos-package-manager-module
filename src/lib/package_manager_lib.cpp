@@ -144,7 +144,7 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString&
             }
         }
     }
-    bool isCoreModule = (detectedType != "ui");
+    bool isCoreModule = (detectedType == "core");
     qDebug() << "Module type:" << detectedType << "(isCoreModule:" << isCoreModule << ")";
 
     QString pluginsDirectory;
@@ -190,18 +190,10 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString&
     qDebug() << "Successfully installed plugin from LGX package to:" << pluginsDirectory;
 
     // Emit signal for the installed library using manifest's main field for the correct filename
-    QString libExtension;
-#if defined(Q_OS_MAC)
-    libExtension = ".dylib";
-#elif defined(Q_OS_WIN)
-    libExtension = ".dll";
-#else
-    libExtension = ".so";
-#endif
-
     {
         QString installedManifestPath = pluginsDirectory + "/" + installedModuleName + "/manifest.json";
-        QString mainLibFile;
+        QString mainFile;
+        bool isQmlPackage = (detectedType == "ui_qml");
         QFile installedMf(installedManifestPath);
         if (installedMf.open(QIODevice::ReadOnly)) {
             QJsonDocument doc = QJsonDocument::fromJson(installedMf.readAll());
@@ -209,20 +201,34 @@ QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString&
             if (doc.isObject()) {
                 QJsonObject mainObj = doc.object().value("main").toObject();
                 for (const QString& v : platformVariantsToTry()) {
-                    mainLibFile = mainObj.value(v).toString();
-                    if (!mainLibFile.isEmpty())
+                    mainFile = mainObj.value(v).toString();
+                    if (!mainFile.isEmpty())
                         break;
                 }
             }
         }
-        if (mainLibFile.isEmpty()) {
-            mainLibFile = installedModuleName + libExtension;
+        if (mainFile.isEmpty()) {
+            mainFile = installedModuleName;
         }
-        QString libPath = pluginsDirectory + "/" + installedModuleName + "/" + mainLibFile;
-        if (QFile::exists(libPath)) {
-            emit pluginFileInstalled(libPath, isCoreModule);
+        // For core and ui packages, the main field is a filename without extension;
+        // append the platform-specific dynamic library extension.
+        // For ui_qml packages, the main field already includes the extension (.qml).
+        if (!isQmlPackage && !mainFile.contains('.')) {
+            QString libExtension;
+#if defined(Q_OS_MAC)
+            libExtension = ".dylib";
+#elif defined(Q_OS_WIN)
+            libExtension = ".dll";
+#else
+            libExtension = ".so";
+#endif
+            mainFile += libExtension;
+        }
+        QString mainPath = pluginsDirectory + "/" + installedModuleName + "/" + mainFile;
+        if (QFile::exists(mainPath)) {
+            emit pluginFileInstalled(mainPath, isCoreModule);
         } else {
-            qWarning() << "Installed main library not found at expected path:" << libPath;
+            qWarning() << "Installed main file not found at expected path:" << mainPath;
         }
     }
 
