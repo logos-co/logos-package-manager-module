@@ -278,19 +278,6 @@ QJsonArray PackageManagerLib::getPackages()
                     }
                 }
             }
-            // Also check for QML plugins (metadata.json with pluginType)
-            QString metadataPath = dirPath + "/" + subdir + "/metadata.json";
-            if (metadataPath != manifestPath) {
-                QFile metadataFile(metadataPath);
-                if (metadataFile.open(QIODevice::ReadOnly)) {
-                    QJsonDocument doc = QJsonDocument::fromJson(metadataFile.readAll());
-                    metadataFile.close();
-                    if (doc.isObject()) {
-                        // For QML plugins, use the directory name as the module name
-                        installedModuleNames.insert(subdir);
-                    }
-                }
-            }
         }
     };
 
