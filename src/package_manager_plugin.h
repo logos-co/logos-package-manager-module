@@ -27,6 +27,7 @@ public:
     Q_INVOKABLE QStringList resolveDependencies(const QStringList& packageNames);
     Q_INVOKABLE void setPluginsDirectory(const QString& pluginsDirectory);
     Q_INVOKABLE void setUiPluginsDirectory(const QString& uiPluginsDirectory);
+    Q_INVOKABLE void setRelease(const QString& releaseTag);
     Q_INVOKABLE bool installPackage(const QString& packageName, const QString& pluginsDirectory);
     Q_INVOKABLE bool installPackages(const QStringList& packageNames, const QString& pluginsDirectory);
     Q_INVOKABLE void installPackageAsync(const QString& packageName, const QString& pluginsDirectory);

@@ -153,3 +153,7 @@ void PackageManagerPlugin::setPluginsDirectory(const QString& pluginsDirectory) 
 void PackageManagerPlugin::setUiPluginsDirectory(const QString& uiPluginsDirectory) {
     m_lib->setUiPluginsDirectory(uiPluginsDirectory);
 }
+
+void PackageManagerPlugin::setRelease(const QString& releaseTag) {
+    m_lib->setRelease(releaseTag);
+}

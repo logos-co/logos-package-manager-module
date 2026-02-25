@@ -253,6 +253,7 @@ void printHelp() {
     out << "Options:" << Qt::endl;
     out << "  --modules-dir <path>    Set core modules directory" << Qt::endl;
     out << "  --ui-plugins-dir <path> Set UI plugins directory" << Qt::endl;
+    out << "  --release <tag>         GitHub release tag to use (default: latest)" << Qt::endl;
     out << "  --category <cat>        Filter by category (for list command)" << Qt::endl;
     out << "  --installed             Show only installed packages (for list command)" << Qt::endl;
     out << "  --file <path>           Install from a local LGX file (for install command)" << Qt::endl;
@@ -278,6 +279,7 @@ int main(int argc, char *argv[]) {
     QCommandLineOption installedOption("installed", "Show only installed packages");
     QCommandLineOption jsonOption("json", "Output in JSON format");
     QCommandLineOption fileOption("file", "Install from a local LGX file path", "path");
+    QCommandLineOption releaseOption("release", "GitHub release tag to use (default: latest)", "tag", "latest");
 
     parser.addOption(helpOption);
     parser.addOption(versionOption);
@@ -287,6 +289,7 @@ int main(int argc, char *argv[]) {
     parser.addOption(installedOption);
     parser.addOption(jsonOption);
     parser.addOption(fileOption);
+    parser.addOption(releaseOption);
     parser.addPositionalArgument("command", "Command to run");
     parser.addPositionalArgument("args", "Command arguments", "[args...]");
     
@@ -320,6 +323,10 @@ int main(int argc, char *argv[]) {
     
     if (parser.isSet(uiPluginsDirOption)) {
         pm.setUiPluginsDirectory(parser.value(uiPluginsDirOption));
+    }
+
+    if (parser.isSet(releaseOption)) {
+        pm.setRelease(parser.value(releaseOption));
     }
     
     if (command == "search") {

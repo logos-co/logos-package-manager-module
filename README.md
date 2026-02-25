@@ -115,6 +115,7 @@ Display detailed information about a specific package.
 |--------|-------------|
 | `--modules-dir <path>` | Set core modules installation directory |
 | `--ui-plugins-dir <path>` | Set UI plugins installation directory |
+| `--release <tag>` | GitHub release tag to use (default: `latest`) |
 | `--json` | Output results in JSON format |
 | `-h, --help` | Show help message |
 | `-v, --version` | Show version information |
@@ -142,6 +143,12 @@ lgpm info waku-module
 
 # Install to a custom directory
 lgpm --modules-dir /path/to/modules install waku-module
+
+# Install from a specific release instead of "latest"
+lgpm --release v2.1.0 install waku-module
+
+# List packages available in a specific release
+lgpm --release v2.1.0 list --json
 ```
 
 ## Dependencies

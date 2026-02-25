@@ -14,7 +14,7 @@
 #include <algorithm>
 #include "lgx.h"
 
-static const QString MODULES_DOWNLOAD_BASE_URL = QStringLiteral("https://github.com/logos-co/logos-modules/releases/latest/download");
+static const QString MODULES_REPO_BASE = QStringLiteral("https://github.com/logos-co/logos-modules/releases");
 
 // Returns true if version string `a` is >= `b`, comparing dot-separated numeric segments.
 static bool versionGreaterOrEqual(const QString& a, const QString& b)
@@ -33,6 +33,7 @@ static bool versionGreaterOrEqual(const QString& a, const QString& b)
 
 PackageManagerLib::PackageManagerLib(QObject* parent)
     : QObject(parent)
+    , m_releaseTag(QStringLiteral("latest"))
     , m_networkManager(nullptr)
     , m_isInstalling(false)
 {
@@ -55,6 +56,20 @@ void PackageManagerLib::setUiPluginsDirectory(const QString& uiPluginsDirectory)
 {
     m_uiPluginsDirectory = uiPluginsDirectory;
     qDebug() << "Set UI plugins directory to:" << m_uiPluginsDirectory;
+}
+
+void PackageManagerLib::setRelease(const QString& releaseTag)
+{
+    m_releaseTag = releaseTag.isEmpty() ? QStringLiteral("latest") : releaseTag;
+    qDebug() << "Set release tag to:" << m_releaseTag;
+}
+
+QString PackageManagerLib::downloadBaseUrl() const
+{
+    if (m_releaseTag == "latest") {
+        return MODULES_REPO_BASE + "/latest/download";
+    }
+    return MODULES_REPO_BASE + "/download/" + m_releaseTag;
 }
 
 QString PackageManagerLib::installPluginFile(const QString& pluginPath, QString& errorMsg, bool skipIfNotNewerVersion)
@@ -407,7 +422,7 @@ bool PackageManagerLib::installPackage(const QString& packageName)
     }
 
     // Download the LGX package file
-    QString downloadUrl = QString("%1/%2").arg(MODULES_DOWNLOAD_BASE_URL, packageFile);
+    QString downloadUrl = QString("%1/%2").arg(downloadBaseUrl(), packageFile);
     QString destinationPath = QDir(tempDir).filePath(packageFile);
 
     qDebug() << "Downloading package file:" << packageFile;
@@ -503,7 +518,7 @@ void PackageManagerLib::startAsyncPackageListFetch()
         return;
     }
     
-    QString urlString = QString("%1/list.json").arg(MODULES_DOWNLOAD_BASE_URL);
+    QString urlString = QString("%1/list.json").arg(downloadBaseUrl());
     QUrl url(urlString);
     QNetworkRequest request(url);
     
@@ -602,7 +617,7 @@ void PackageManagerLib::startNextFileDownload()
     }
     
     QString fileName = m_asyncState.filesToDownload[m_asyncState.currentDownloadIndex];
-    QString downloadUrl = QString("%1/%2").arg(MODULES_DOWNLOAD_BASE_URL, fileName);
+    QString downloadUrl = QString("%1/%2").arg(downloadBaseUrl(), fileName);
     
     qDebug() << "Async: Downloading package file:" << fileName;
     
@@ -714,7 +729,7 @@ QJsonArray PackageManagerLib::fetchPackageListFromOnline()
         return packagesArray;
     }
 
-    QString urlString = QString("%1/list.json").arg(MODULES_DOWNLOAD_BASE_URL);
+    QString urlString = QString("%1/list.json").arg(downloadBaseUrl());
     QUrl url(urlString);
     QNetworkRequest request(url);
     
