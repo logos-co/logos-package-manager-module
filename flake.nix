@@ -7,20 +7,24 @@
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
     logos-liblogos.url = "github:logos-co/logos-liblogos";
     logos-package.url = "github:logos-co/logos-package";
+    nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
+    nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage";
   };
 
-  outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-package }:
+  outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-package, nix-bundle-dir, nix-bundle-appimage }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
+        inherit system;
         pkgs = import nixpkgs { inherit system; };
         logosSdk = logos-cpp-sdk.packages.${system}.default;
         logosLiblogos = logos-liblogos.packages.${system}.default;
         logosPackageLib = logos-package.packages.${system}.lib;
+        dirBundler = nix-bundle-dir.bundlers.${system}.qtApp;
       });
     in
     {
-      packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosPackageLib }: 
+      packages = forAllSystems ({ pkgs, system, logosSdk, logosLiblogos, logosPackageLib, dirBundler }:
         let
           # Common configuration
           common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosPackageLib; };
@@ -49,6 +53,17 @@
           lib = lib;
           cli = cli;
 
+          # Bundle outputs
+          cli-bundle-dir = dirBundler cli;
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          cli-appimage = nix-bundle-appimage.lib.${system}.mkAppImage {
+            drv = cli;
+            name = "lgpm";
+            bundle = dirBundler cli;
+            desktopFile = ./assets/lgpm.desktop;
+            icon = ./assets/lgpm.png;
+          };
+        } // {
           # Default package (combined)
           default = combined;
         }
