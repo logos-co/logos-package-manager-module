@@ -22,6 +22,10 @@ public:
     QString pluginsDirectory() const { return m_pluginsDirectory; }
     QString uiPluginsDirectory() const { return m_uiPluginsDirectory; }
 
+    // Release tag (defaults to "latest")
+    void setRelease(const QString& releaseTag);
+    QString release() const { return m_releaseTag; }
+
     QString installPluginFile(const QString& pluginPath, QString& errorMsg, bool skipIfNotNewerVersion = false);
     
     QJsonArray getPackages();
@@ -62,6 +66,7 @@ private slots:
 private:
     QString m_pluginsDirectory;
     QString m_uiPluginsDirectory;
+    QString m_releaseTag;
     QNetworkAccessManager* m_networkManager;
     
     struct AsyncInstallState {
@@ -78,6 +83,8 @@ private:
     bool m_isInstalling;
     QQueue<QStringList> m_requestQueue;
     
+    QString downloadBaseUrl() const;
+
     void startAsyncPackageListFetch();
     void startNextFileDownload();
     void finishAsyncInstallation(bool success, const QString& error);
