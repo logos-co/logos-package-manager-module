@@ -7,7 +7,7 @@ class PackageManagerInterface : public PluginInterface
 public:
     virtual ~PackageManagerInterface() {}
     // Expose only the InstallPlugin API
-    Q_INVOKABLE virtual bool installPlugin(const QString &pluginPath) = 0;
+    Q_INVOKABLE virtual bool installPlugin(const QString &pluginPath, bool skipIfNotNewerVersion = false) = 0;
 };
 
 #define PackageManagerInterface_iid "org.logos.PackageManagerInterface"
