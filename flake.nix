@@ -7,16 +7,23 @@
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
     logos-liblogos.url = "github:logos-co/logos-liblogos";
     logos-package.url = "github:logos-co/logos-package";
-    nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
-    nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage";
+    nix-bundle-dir.url = "github:logos-co/nix-bundle-dir/bundle-glib-schemas";
+    nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage/bundle-glib-schemas";
   };
 
   outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-package, nix-bundle-dir, nix-bundle-appimage }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
-        inherit system;
-        pkgs = import nixpkgs { inherit system; };
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
+        let
+          # Apply the portable overlay so bundled libraries don't hardcode
+          # /nix/store paths (e.g. libproxy's gsettings schema paths).
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ nix-bundle-dir.overlays.portable ];
+          };
+        in f {
+        inherit system pkgs;
         logosSdk = logos-cpp-sdk.packages.${system}.default;
         logosLiblogos = logos-liblogos.packages.${system}.default;
         logosPackageLib = logos-package.packages.${system}.lib;
@@ -37,7 +44,11 @@
           include = import ./nix/include.nix { inherit pkgs common src lib logosSdk; };
 
           # CLI package
-          cli = import ./nix/cli.nix { inherit pkgs common src; };
+          cli = (import ./nix/cli.nix { inherit pkgs common src; }).overrideAttrs (old: {
+            passthru = (old.passthru or {}) // {
+              extraClosurePaths = [ pkgs.gsettings-desktop-schemas ];
+            };
+          });
 
           # Combined package
           combined = pkgs.symlinkJoin {
