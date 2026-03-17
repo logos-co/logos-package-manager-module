@@ -36,6 +36,7 @@ public:
     Q_INVOKABLE void initLogos(LogosAPI* logosAPIInstance);
     
     Q_INVOKABLE QString testPluginCall(const QString& foo);
+    Q_INVOKABLE void testEvent(const QString& message);
 
 signals:
     void eventResponse(const QString& eventName, const QVariantList& data);
