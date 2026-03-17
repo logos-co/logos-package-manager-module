@@ -1,6 +1,7 @@
 #include "package_manager_plugin.h"
 #include "lib/package_manager_lib.h"
 #include <QDebug>
+#include <QDateTime>
 #include "logos_api_client.h"
 
 PackageManagerPlugin::PackageManagerPlugin()
@@ -114,22 +115,11 @@ void PackageManagerPlugin::onInstallationFinished(const QString& packageName, bo
 }
 
 void PackageManagerPlugin::emitInstallationEvent(const QString& packageName, bool success, const QString& error) {
-    if (!logosAPI) {
-        qWarning() << "Cannot emit installation event: LogosAPI not initialized";
-        return;
-    }
-    
-    LogosAPIClient* client = logosAPI->getClient("package_manager");
-    if (!client) {
-        qWarning() << "Cannot emit installation event: package_manager client not available";
-        return;
-    }
-    
     QVariantList eventData;
     eventData << packageName << success << error;
     
     qDebug() << "Emitting packageInstallationFinished event:" << packageName << success << error;
-    client->onEventResponse(this, "packageInstallationFinished", eventData);
+    emit eventResponse("packageInstallationFinished", eventData);
 }
 
 void PackageManagerPlugin::initLogos(LogosAPI* logosAPIInstance) {
@@ -144,6 +134,16 @@ QString PackageManagerPlugin::testPluginCall(const QString& foo) {
     qDebug() << "testPluginCall: " << foo;
     qDebug() << "--------------------------------";
     return "hello " + foo;
+}
+
+void PackageManagerPlugin::testEvent(const QString& message) {
+    qDebug() << "[LogosObject] testEvent called with:" << message;
+
+    QVariantList eventData;
+    eventData << message << QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    qDebug() << "[LogosObject] Emitting testEventResponse via emit eventResponse()";
+    emit eventResponse("testEventResponse", eventData);
 }
 
 void PackageManagerPlugin::setPluginsDirectory(const QString& pluginsDirectory) {
