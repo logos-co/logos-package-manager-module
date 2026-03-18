@@ -1,42 +1,44 @@
 # Common build configuration shared across all packages
-{ pkgs, logosSdk, logosLiblogos, logosPackageLib }:
+{ pkgs, logosSdk, logosLiblogos, logosPackageLib, portableBuild ? false }:
 
 {
   pname = "logos-package-manager";
   version = "1.0.0";
-  
+
   # Common native build inputs
-  nativeBuildInputs = [ 
-    pkgs.cmake 
-    pkgs.ninja 
+  nativeBuildInputs = [
+    pkgs.cmake
+    pkgs.ninja
     pkgs.pkg-config
     pkgs.qt6.wrapQtAppsNoGuiHook
   ];
-  
+
   # Common runtime dependencies
-  buildInputs = [ 
-    pkgs.qt6.qtbase 
-    pkgs.qt6.qtremoteobjects 
+  buildInputs = [
+    pkgs.qt6.qtbase
+    pkgs.qt6.qtremoteobjects
     pkgs.zstd
     logosPackageLib  # Required for liblgx.so (needed by autoPatchelfHook)
   ];
-  
+
   # Common CMake flags
-  cmakeFlags = [ 
+  cmakeFlags = [
     "-GNinja"
     "-DLOGOS_CPP_SDK_ROOT=${logosSdk}"
     "-DLOGOS_LIBLOGOS_ROOT=${logosLiblogos}"
     "-DLGX_ROOT=${logosPackageLib}"
     "-DLOGOS_PACKAGE_MANAGER_USE_VENDOR=OFF"
+  ] ++ pkgs.lib.optionals portableBuild [
+    "-DLGPM_PORTABLE_BUILD=ON"
   ];
-  
+
   # Environment variables
   env = {
     LOGOS_CPP_SDK_ROOT = "${logosSdk}";
     LOGOS_LIBLOGOS_ROOT = "${logosLiblogos}";
     LGX_ROOT = "${logosPackageLib}";
   };
-  
+
   # Metadata
   meta = with pkgs.lib; {
     description = "Logos Package Manager Module - Plugin manager for the Logos system";

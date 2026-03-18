@@ -3,9 +3,12 @@
 ## Building with Nix (Recommended)
 
 ### Outputs
-- `.#lib`: builds the plugin library (`package_manager_plugin.{dylib|so}`)
+- `.#lib`: builds the plugin library (`package_manager_plugin.{dylib|so}`) — dev build (selects `-dev` LGX variants)
+- `.#lib-portable`: builds the plugin library — portable build (selects portable LGX variants)
 - `.#logos-package-manager-include`: generates C/C++ headers from the built plugin
-- `.#cli`: builds the command-line tool (`lgpm`)
+- `.#cli`: builds the command-line tool (`lgpm`) — dev build
+- `.#cli-portable`: builds the CLI — portable build
+- `.#cli-bundle-dir`: bundled portable CLI (self-contained directory)
 - `.#default`: combined output exposing both `lib/` and `include/`
 
 ### Build the module
@@ -150,6 +153,19 @@ lgpm --release v2.1.0 install waku-module
 # List packages available in a specific release
 lgpm --release v2.1.0 list --json
 ```
+
+## Dev vs Portable Builds
+
+The package manager supports two build modes controlled by the `LGPM_PORTABLE_BUILD` CMake flag:
+
+- **Dev build** (default): Selects LGX variants with `-dev` suffix (e.g., `linux-amd64-dev`). Used in Nix/development environments where libraries resolve from `/nix/store`.
+- **Portable build** (`-DLGPM_PORTABLE_BUILD=ON`): Selects portable LGX variants without suffix (e.g., `linux-amd64`). Used in self-contained distributed applications.
+
+This is a compile-time choice with no fallback — a dev build will reject packages that only contain portable variants, and vice versa.
+
+### Variant File
+
+When a package is installed, a `variant` text file is written to the module's installation subdirectory containing the name of the installed variant (e.g., `linux-amd64-dev`).
 
 ## Dependencies
 

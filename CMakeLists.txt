@@ -6,6 +6,7 @@ include(GNUInstallDirs)
 set(CMAKE_AUTOMOC ON)
 
 option(LOGOS_PACKAGE_MANAGER_USE_VENDOR "Force use of vendored Logos dependencies" OFF)
+option(LGPM_PORTABLE_BUILD "Build for portable variant selection (selects portable LGX variants instead of dev)" OFF)
 
 # Allow override from environment or command line
 if(NOT DEFINED LOGOS_LIBLOGOS_ROOT)
@@ -169,6 +170,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     target_compile_definitions(package_manager_plugin PRIVATE QT_STATICPLUGIN)
 else()
     add_library(package_manager_plugin SHARED ${PLUGIN_SOURCES})
+endif()
+
+# Propagate portable build flag to plugin library
+if(LGPM_PORTABLE_BUILD)
+    target_compile_definitions(package_manager_plugin PRIVATE LGPM_PORTABLE_BUILD=1)
 endif()
 
 # Set output name without lib prefix

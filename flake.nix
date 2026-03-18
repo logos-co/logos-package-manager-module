@@ -26,18 +26,26 @@
     {
       packages = forAllSystems ({ pkgs, system, logosSdk, logosLiblogos, logosPackageLib, dirBundler }:
         let
-          # Common configuration
+          # Common configuration (dev, default)
           common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosPackageLib; };
+          # Common configuration (portable)
+          commonPortable = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosPackageLib; portableBuild = true; };
           src = ./.;
-          
-          # Library package
+
+          # Library package (dev)
           lib = import ./nix/lib.nix { inherit pkgs common src logosPackageLib; };
+
+          # Library package (portable)
+          libPortable = import ./nix/lib.nix { inherit pkgs src logosPackageLib; common = commonPortable; };
 
           # Include package (generated headers from plugin)
           include = import ./nix/include.nix { inherit pkgs common src lib logosSdk; };
 
-          # CLI package
+          # CLI package (dev)
           cli = import ./nix/cli.nix { inherit pkgs common src; };
+
+          # CLI package (portable)
+          cliPortable = import ./nix/cli.nix { inherit pkgs src; common = commonPortable; };
 
           # Combined package
           combined = pkgs.symlinkJoin {
@@ -51,10 +59,12 @@
           logos-package-manager-include = include;
           logos-package-manager-cli = cli;
           lib = lib;
+          lib-portable = libPortable;
           cli = cli;
+          cli-portable = cliPortable;
 
           # Bundle outputs
-          cli-bundle-dir = dirBundler cli;
+          cli-bundle-dir = dirBundler cliPortable;
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           cli-appimage = nix-bundle-appimage.lib.${system}.mkAppImage {
             drv = cli;
