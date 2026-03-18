@@ -33,7 +33,7 @@
           src = ./.;
 
           # Library package (dev)
-          lib = import ./nix/lib.nix { inherit pkgs common src logosPackageLib; };
+          lib = import ./nix/lib.nix { inherit pkgs common src logosPackageLib logosSdk; };
 
           # Library package (portable)
           libPortable = import ./nix/lib.nix { inherit pkgs src logosPackageLib; common = commonPortable; };

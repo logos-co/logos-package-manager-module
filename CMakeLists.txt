@@ -109,10 +109,13 @@ elseif(_cpp_sdk_is_source)
         )
     endif()
     
+    set(PROVIDER_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/package_manager_impl.h")
     add_custom_target(run_cpp_generator_package_manager
         COMMAND "${CPP_GENERATOR}" --metadata "${METADATA_JSON}" --module-dir "${PLUGINS_OUTPUT_DIR}"
+        COMMAND "${CPP_GENERATOR}" --provider-header "${PROVIDER_HEADER}"
+                --output-dir "${CMAKE_CURRENT_SOURCE_DIR}"
         WORKING_DIRECTORY "${LOGOS_DEPS_ROOT}"
-        COMMENT "Running logos-cpp-generator on ${METADATA_JSON} with module-dir ${PLUGINS_OUTPUT_DIR}"
+        COMMENT "Running logos-cpp-generator on ${METADATA_JSON} and provider dispatch"
         VERBATIM
     )
     add_dependencies(run_cpp_generator_package_manager cpp_generator_build)
@@ -129,12 +132,15 @@ else()
 endif()
 
 # Plugin sources
+set(PROVIDER_DISPATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/logos_provider_dispatch.cpp")
+
 set(PLUGIN_SOURCES
-    src/package_manager_plugin.cpp
-    src/package_manager_plugin.h
-    src/package_manager_interface.h
+    src/package_manager_impl.cpp
+    src/package_manager_impl.h
+    src/package_manager_loader.h
     src/lib/package_manager_lib.cpp
     src/lib/package_manager_lib.h
+    ${PROVIDER_DISPATCH_FILE}
 )
 
 # Add liblogos interface header
@@ -159,6 +165,10 @@ if(_cpp_sdk_is_source)
         ${LOGOS_CPP_SDK_ROOT}/cpp/token_manager.h
         ${LOGOS_CPP_SDK_ROOT}/cpp/module_proxy.cpp
         ${LOGOS_CPP_SDK_ROOT}/cpp/module_proxy.h
+        ${LOGOS_CPP_SDK_ROOT}/cpp/logos_provider_object.cpp
+        ${LOGOS_CPP_SDK_ROOT}/cpp/logos_provider_object.h
+        ${LOGOS_CPP_SDK_ROOT}/cpp/qt_provider_object.cpp
+        ${LOGOS_CPP_SDK_ROOT}/cpp/qt_provider_object.h
     )
 endif()
 
