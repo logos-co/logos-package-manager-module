@@ -2,7 +2,6 @@
 
 #include "logos_provider_object.h"
 #include "logos_api.h"
-#include "logos_api_client.h"
 #include <QJsonArray>
 #include <QStringList>
 
