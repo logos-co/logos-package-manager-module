@@ -44,26 +44,10 @@ void PackageManagerImpl::onPluginFileInstalled(const QString& pluginPath, bool i
         return;
     }
 
-    if (!logosAPI()) {
-        qWarning() << "Cannot process plugin: LogosAPI not initialized";
-        return;
-    }
-
-    LogosAPIClient* coreManagerClient = logosAPI()->getClient("core_manager");
-    if (!coreManagerClient || !coreManagerClient->isConnected()) {
-        qWarning() << "Failed to connect to Logos Core registry.";
-        return;
-    }
-
-    qDebug() << "Calling processPlugin with path:" << pluginPath;
-    QVariant result = coreManagerClient->invokeRemoteMethod("core_manager", "processPlugin", pluginPath);
-    QString pluginName = result.toString();
-    if (pluginName.isEmpty()) {
-        qDebug() << "ERROR: --------------------------------";
-        qWarning() << "Failed to process installed plugin:" << pluginPath;
-    } else {
-        qDebug() << "Successfully processed installed plugin:" << pluginName;
-    }
+    qDebug() << "Emitting corePluginFileInstalled event for:" << pluginPath;
+    QVariantList eventData;
+    eventData << pluginPath;
+    emitEvent("corePluginFileInstalled", eventData);
 }
 
 QJsonArray PackageManagerImpl::getPackages()
