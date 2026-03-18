@@ -95,9 +95,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         COMMENT "Skipping logos-cpp-generator for iOS cross-compilation"
     )
 elseif(_cpp_sdk_is_source)
-    # Source layout: build the generator
+    # Source layout: build generators
     set(CPP_GENERATOR_BUILD_DIR "${LOGOS_DEPS_ROOT}/build/cpp-generator")
     set(CPP_GENERATOR "${CPP_GENERATOR_BUILD_DIR}/bin/logos-cpp-generator")
+    set(NATIVE_GENERATOR_BUILD_DIR "${LOGOS_DEPS_ROOT}/build/native-generator")
+    set(NATIVE_GENERATOR "${NATIVE_GENERATOR_BUILD_DIR}/logos-native-generator")
     
     if(NOT TARGET cpp_generator_build)
         add_custom_target(cpp_generator_build
@@ -107,25 +109,41 @@ elseif(_cpp_sdk_is_source)
             VERBATIM
         )
     endif()
+
+    if(NOT TARGET native_generator_build)
+        add_custom_target(native_generator_build
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${NATIVE_GENERATOR_BUILD_DIR}"
+            COMMAND ${CMAKE_COMMAND} -S "${LOGOS_CPP_SDK_ROOT}/native-generator"
+                    -B "${NATIVE_GENERATOR_BUILD_DIR}" -GNinja
+            COMMAND ${CMAKE_COMMAND} --build "${NATIVE_GENERATOR_BUILD_DIR}"
+            WORKING_DIRECTORY "${LOGOS_DEPS_ROOT}"
+            COMMENT "Building logos-native-generator"
+            VERBATIM
+        )
+    endif()
     
     set(PROVIDER_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/package_manager_impl.h")
     add_custom_target(run_cpp_generator_package_manager
         COMMAND "${CPP_GENERATOR}" --metadata "${METADATA_JSON}" --module-dir "${PLUGINS_OUTPUT_DIR}"
-        COMMAND "${CPP_GENERATOR}" --provider-header "${PROVIDER_HEADER}"
+        COMMAND "${NATIVE_GENERATOR}" --provider-dispatch "${PROVIDER_HEADER}"
                 --output-dir "${CMAKE_CURRENT_SOURCE_DIR}"
         WORKING_DIRECTORY "${LOGOS_DEPS_ROOT}"
-        COMMENT "Running logos-cpp-generator on ${METADATA_JSON} and provider dispatch"
+        COMMENT "Running logos-cpp-generator and logos-native-generator for package_manager"
         VERBATIM
     )
-    add_dependencies(run_cpp_generator_package_manager cpp_generator_build)
+    add_dependencies(run_cpp_generator_package_manager cpp_generator_build native_generator_build)
 else()
-    # Installed layout: use the generator from the install path
+    # Installed layout: use the generators from the install path
     find_program(CPP_GENERATOR logos-cpp-generator PATHS ${LOGOS_CPP_SDK_ROOT}/bin NO_DEFAULT_PATH REQUIRED)
+    find_program(NATIVE_GENERATOR logos-native-generator PATHS ${LOGOS_CPP_SDK_ROOT}/bin NO_DEFAULT_PATH REQUIRED)
     
+    set(PROVIDER_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/package_manager_impl.h")
     add_custom_target(run_cpp_generator_package_manager
         COMMAND "${CPP_GENERATOR}" --metadata "${METADATA_JSON}" --module-dir "${PLUGINS_OUTPUT_DIR}"
+        COMMAND "${NATIVE_GENERATOR}" --provider-dispatch "${PROVIDER_HEADER}"
+                --output-dir "${CMAKE_CURRENT_SOURCE_DIR}"
         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-        COMMENT "Running logos-cpp-generator on ${METADATA_JSON} with module-dir ${PLUGINS_OUTPUT_DIR}"
+        COMMENT "Running logos-cpp-generator and logos-native-generator for package_manager"
         VERBATIM
     )
 endif()
@@ -168,6 +186,12 @@ if(_cpp_sdk_is_source)
         ${LOGOS_CPP_SDK_ROOT}/cpp/logos_provider_object.h
         ${LOGOS_CPP_SDK_ROOT}/cpp/qt_provider_object.cpp
         ${LOGOS_CPP_SDK_ROOT}/cpp/qt_provider_object.h
+        ${LOGOS_CPP_SDK_ROOT}/cpp/native/logos_value.cpp
+        ${LOGOS_CPP_SDK_ROOT}/cpp/native/logos_value_qt.cpp
+        ${LOGOS_CPP_SDK_ROOT}/cpp/native/logos_native_provider.cpp
+        ${LOGOS_CPP_SDK_ROOT}/cpp/native/logos_native_client.cpp
+        ${LOGOS_CPP_SDK_ROOT}/cpp/native/logos_native_api.cpp
+        ${LOGOS_CPP_SDK_ROOT}/cpp/native/logos_native_adapter.cpp
     )
 endif()
 
@@ -181,9 +205,11 @@ else()
     add_library(package_manager_plugin SHARED ${PLUGIN_SOURCES})
 endif()
 
-# Set output name without lib prefix
+# Set output name without lib prefix, require C++17 for native types
 set_target_properties(package_manager_plugin PROPERTIES
-    PREFIX "")
+    PREFIX ""
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON)
 
 # Ensure generator runs before building the plugin
 add_dependencies(package_manager_plugin run_cpp_generator_package_manager)
@@ -224,6 +250,7 @@ endif()
 if(_cpp_sdk_is_source)
     target_include_directories(package_manager_plugin PRIVATE 
         ${LOGOS_CPP_SDK_ROOT}/cpp
+        ${LOGOS_CPP_SDK_ROOT}/cpp/native
         ${LOGOS_CPP_SDK_ROOT}/cpp/generated
     )
 else()
@@ -231,6 +258,7 @@ else()
         ${LOGOS_CPP_SDK_ROOT}/include
         ${LOGOS_CPP_SDK_ROOT}/include/cpp
         ${LOGOS_CPP_SDK_ROOT}/include/core
+        ${LOGOS_CPP_SDK_ROOT}/include/cpp/native
     )
 endif()
 

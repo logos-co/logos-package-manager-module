@@ -19,32 +19,16 @@ pkgs.stdenv.mkDerivation {
     # Create output directory for generated headers
     mkdir -p ./generated_headers
 
-    # Determine platform-specific library extension
-    if [ -f "${lib}/lib/package_manager_plugin.dylib" ]; then
-      PLUGIN_FILE="${lib}/lib/package_manager_plugin.dylib"
-    elif [ -f "${lib}/lib/package_manager_plugin.so" ]; then
-      PLUGIN_FILE="${lib}/lib/package_manager_plugin.so"
-    else
-      echo "Error: No package_manager_plugin library file found"
-      exit 1
-    fi
-
-    # Set library path so the plugin can find dependencies when loaded
-    if [ "$(uname -s)" = "Darwin" ]; then
-      export DYLD_LIBRARY_PATH="${lib}/lib:''${DYLD_LIBRARY_PATH:-}"
-    else
-      export LD_LIBRARY_PATH="${lib}/lib:''${LD_LIBRARY_PATH:-}"
-    fi
-
-    # Run logos-cpp-generator on the built plugin with --module-only flag
-    echo "Running logos-cpp-generator on $PLUGIN_FILE"
-    echo "Library path: ${lib}/lib"
-    ls -la "${lib}/lib"
-    logos-cpp-generator "$PLUGIN_FILE" --output-dir ./generated_headers --module-only || {
-      echo "Warning: logos-cpp-generator failed, this may be expected if the module has no public API"
-      # Create a marker file to indicate attempt was made
+    # Generate native-typed consumer wrappers from the header file
+    echo "Running logos-native-generator --consumer-wrappers for package_manager..."
+    logos-native-generator --consumer-wrappers "$(pwd)/src/package_manager_impl.h" \
+      --module-name package_manager --output-dir ./generated_headers || {
+      echo "Warning: logos-native-generator failed"
       touch ./generated_headers/.no-api
     }
+
+    echo "Generated wrapper files:"
+    ls -la ./generated_headers/
 
     runHook postBuild
   '';

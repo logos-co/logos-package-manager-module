@@ -1,12 +1,74 @@
 #include "package_manager_impl.h"
 #include "lib/package_manager_lib.h"
+
 #include <QDebug>
 #include <QDateTime>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QString>
+#include <QStringList>
+
+// Qt → native conversion helpers (internal to this module)
+namespace {
+
+std::string toStd(const QString& s) { return s.toStdString(); }
+QString toQt(const std::string& s) { return QString::fromStdString(s); }
+
+QStringList toQtList(const std::vector<std::string>& v)
+{
+    QStringList out;
+    out.reserve(static_cast<int>(v.size()));
+    for (const auto& s : v)
+        out << QString::fromStdString(s);
+    return out;
+}
+
+std::vector<std::string> toStdList(const QStringList& v)
+{
+    std::vector<std::string> out;
+    out.reserve(v.size());
+    for (const auto& s : v)
+        out.push_back(s.toStdString());
+    return out;
+}
+
+LogosValue jsonValueToLogosValue(const QJsonValue& v)
+{
+    if (v.isBool()) return LogosValue(v.toBool());
+    if (v.isDouble()) return LogosValue(v.toDouble());
+    if (v.isString()) return LogosValue(v.toString().toStdString());
+    if (v.isArray()) {
+        LogosValue::List list;
+        for (const auto& item : v.toArray())
+            list.push_back(jsonValueToLogosValue(item));
+        return LogosValue(list);
+    }
+    if (v.isObject()) {
+        LogosValue::Map map;
+        QJsonObject obj = v.toObject();
+        for (auto it = obj.begin(); it != obj.end(); ++it)
+            map[it.key().toStdString()] = jsonValueToLogosValue(it.value());
+        return LogosValue(map);
+    }
+    return LogosValue();
+}
+
+LogosValue jsonArrayToLogosValue(const QJsonArray& arr)
+{
+    LogosValue::List list;
+    list.reserve(arr.size());
+    for (const auto& item : arr)
+        list.push_back(jsonValueToLogosValue(item));
+    return LogosValue(list);
+}
+
+} // anonymous namespace
 
 PackageManagerImpl::PackageManagerImpl()
     : m_lib(nullptr)
 {
-    qDebug() << "PackageManagerImpl created (new provider API)";
+    qDebug() << "PackageManagerImpl created (native provider API)";
 
     m_lib = new PackageManagerLib(nullptr);
 
@@ -26,15 +88,15 @@ PackageManagerImpl::~PackageManagerImpl()
     m_lib = nullptr;
 }
 
-void PackageManagerImpl::onInit(LogosAPI* api)
+void PackageManagerImpl::onInit(NativeLogosAPI* api)
 {
-    qDebug() << "PackageManagerImpl: LogosAPI initialized (new provider API)";
+    qDebug() << "PackageManagerImpl: NativeLogosAPI initialized (native provider API)";
 }
 
-bool PackageManagerImpl::installPlugin(const QString& pluginPath, bool skipIfNotNewerVersion)
+bool PackageManagerImpl::installPlugin(const std::string& pluginPath, bool skipIfNotNewerVersion)
 {
     QString errorMsg;
-    QString installedPath = m_lib->installPluginFile(pluginPath, errorMsg, skipIfNotNewerVersion);
+    QString installedPath = m_lib->installPluginFile(toQt(pluginPath), errorMsg, skipIfNotNewerVersion);
     return !installedPath.isEmpty();
 }
 
@@ -45,57 +107,57 @@ void PackageManagerImpl::onPluginFileInstalled(const QString& pluginPath, bool i
     }
 
     qDebug() << "Emitting corePluginFileInstalled event for:" << pluginPath;
-    QVariantList eventData;
-    eventData << pluginPath;
-    emitEvent("corePluginFileInstalled", eventData);
+    emitEvent("corePluginFileInstalled", {LogosValue(toStd(pluginPath))});
 }
 
-QJsonArray PackageManagerImpl::getPackages()
+LogosValue PackageManagerImpl::getPackages()
 {
-    return m_lib->getPackages();
+    return jsonArrayToLogosValue(m_lib->getPackages());
 }
 
-QJsonArray PackageManagerImpl::getPackages(const QString& category)
+LogosValue PackageManagerImpl::getPackages(const std::string& category)
 {
-    return m_lib->getPackages(category);
+    return jsonArrayToLogosValue(m_lib->getPackages(toQt(category)));
 }
 
-QStringList PackageManagerImpl::getCategories()
+std::vector<std::string> PackageManagerImpl::getCategories()
 {
-    return m_lib->getCategories();
+    return toStdList(m_lib->getCategories());
 }
 
-QStringList PackageManagerImpl::resolveDependencies(const QStringList& packageNames)
+std::vector<std::string> PackageManagerImpl::resolveDependencies(const std::vector<std::string>& packageNames)
 {
-    return m_lib->resolveDependencies(packageNames);
+    return toStdList(m_lib->resolveDependencies(toQtList(packageNames)));
 }
 
-bool PackageManagerImpl::installPackage(const QString& packageName, const QString& pluginsDirectory)
+bool PackageManagerImpl::installPackage(const std::string& packageName, const std::string& pluginsDirectory)
 {
-    qDebug() << "Installing package:" << packageName;
-    m_lib->setPluginsDirectory(pluginsDirectory);
-    return m_lib->installPackage(packageName);
+    qDebug() << "Installing package:" << toQt(packageName);
+    m_lib->setPluginsDirectory(toQt(pluginsDirectory));
+    return m_lib->installPackage(toQt(packageName));
 }
 
-bool PackageManagerImpl::installPackages(const QStringList& packageNames, const QString& pluginsDirectory)
+bool PackageManagerImpl::installPackages(const std::vector<std::string>& packageNames, const std::string& pluginsDirectory)
 {
-    qDebug() << "Installing packages:" << packageNames;
-    m_lib->setPluginsDirectory(pluginsDirectory);
-    return m_lib->installPackages(packageNames);
+    QStringList qtNames = toQtList(packageNames);
+    qDebug() << "Installing packages:" << qtNames;
+    m_lib->setPluginsDirectory(toQt(pluginsDirectory));
+    return m_lib->installPackages(qtNames);
 }
 
-void PackageManagerImpl::installPackageAsync(const QString& packageName, const QString& pluginsDirectory)
+void PackageManagerImpl::installPackageAsync(const std::string& packageName, const std::string& pluginsDirectory)
 {
-    qDebug() << "Installing package async:" << packageName;
-    m_lib->setPluginsDirectory(pluginsDirectory);
-    m_lib->installPackageAsync(packageName);
+    qDebug() << "Installing package async:" << toQt(packageName);
+    m_lib->setPluginsDirectory(toQt(pluginsDirectory));
+    m_lib->installPackageAsync(toQt(packageName));
 }
 
-void PackageManagerImpl::installPackagesAsync(const QStringList& packageNames, const QString& pluginsDirectory)
+void PackageManagerImpl::installPackagesAsync(const std::vector<std::string>& packageNames, const std::string& pluginsDirectory)
 {
-    qDebug() << "Installing packages async:" << packageNames;
-    m_lib->setPluginsDirectory(pluginsDirectory);
-    m_lib->installPackagesAsync(packageNames);
+    QStringList qtNames = toQtList(packageNames);
+    qDebug() << "Installing packages async:" << qtNames;
+    m_lib->setPluginsDirectory(toQt(pluginsDirectory));
+    m_lib->installPackagesAsync(qtNames);
 }
 
 void PackageManagerImpl::onInstallationFinished(const QString& packageName, bool success, const QString& error)
@@ -105,43 +167,43 @@ void PackageManagerImpl::onInstallationFinished(const QString& packageName, bool
 
 void PackageManagerImpl::emitInstallationEvent(const QString& packageName, bool success, const QString& error)
 {
-    QVariantList eventData;
-    eventData << packageName << success << error;
-
     qDebug() << "Emitting packageInstallationFinished event:" << packageName << success << error;
-    emitEvent("packageInstallationFinished", eventData);
+    emitEvent("packageInstallationFinished", {
+        LogosValue(toStd(packageName)),
+        LogosValue(success),
+        LogosValue(toStd(error))
+    });
 }
 
-QString PackageManagerImpl::testPluginCall(const QString& foo)
+std::string PackageManagerImpl::testPluginCall(const std::string& foo)
 {
     qDebug() << "--------------------------------";
-    qDebug() << "[NEW] testPluginCall: " << foo;
+    qDebug() << "[NATIVE API] testPluginCall:" << toQt(foo);
     qDebug() << "--------------------------------";
     return "hello " + foo;
 }
 
-void PackageManagerImpl::testEvent(const QString& message)
+void PackageManagerImpl::testEvent(const std::string& message)
 {
-    qDebug() << "[NEW] [LogosProviderObject] testEvent called with:" << message;
+    qDebug() << "[NATIVE API] testEvent called with:" << toQt(message);
 
-    QVariantList eventData;
-    eventData << message << QDateTime::currentDateTime().toString(Qt::ISODate);
+    std::string timestamp = QDateTime::currentDateTime().toString(Qt::ISODate).toStdString();
 
-    qDebug() << "[LogosProviderObject] Emitting testEventResponse via emitEvent()";
-    emitEvent("testEventResponse", eventData);
+    qDebug() << "[NATIVE API] Emitting testEventResponse via emitEvent()";
+    emitEvent("testEventResponse", {LogosValue(message), LogosValue(timestamp)});
 }
 
-void PackageManagerImpl::setPluginsDirectory(const QString& pluginsDirectory)
+void PackageManagerImpl::setPluginsDirectory(const std::string& pluginsDirectory)
 {
-    m_lib->setPluginsDirectory(pluginsDirectory);
+    m_lib->setPluginsDirectory(toQt(pluginsDirectory));
 }
 
-void PackageManagerImpl::setUiPluginsDirectory(const QString& uiPluginsDirectory)
+void PackageManagerImpl::setUiPluginsDirectory(const std::string& uiPluginsDirectory)
 {
-    m_lib->setUiPluginsDirectory(uiPluginsDirectory);
+    m_lib->setUiPluginsDirectory(toQt(uiPluginsDirectory));
 }
 
-void PackageManagerImpl::setRelease(const QString& releaseTag)
+void PackageManagerImpl::setRelease(const std::string& releaseTag)
 {
-    m_lib->setRelease(releaseTag);
+    m_lib->setRelease(toQt(releaseTag));
 }
