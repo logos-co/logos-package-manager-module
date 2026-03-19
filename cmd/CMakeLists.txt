@@ -26,6 +26,11 @@ target_link_libraries(lgpm PRIVATE
 # Link lgx library
 target_link_libraries(lgpm PRIVATE ${LGX_LIB})
 
+# Propagate portable build flag to CLI
+if(LGPM_PORTABLE_BUILD)
+    target_compile_definitions(lgpm PRIVATE LGPM_PORTABLE_BUILD=1)
+endif()
+
 # Set output directory
 set_target_properties(lgpm PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"

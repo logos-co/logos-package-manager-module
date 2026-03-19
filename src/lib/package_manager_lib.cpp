@@ -313,6 +313,17 @@ QJsonArray PackageManagerLib::getPackages()
 
         bool isInstalled = installedModuleNames.contains(moduleName);
 
+        // Check if any of the package's variants match the current platform
+        bool isVariantAvailable = false;
+        QJsonArray variantsArray = packageObj.value("variants").toArray();
+        QStringList systemVariants = platformVariantsToTry();
+        for (const QJsonValue& v : variantsArray) {
+            if (systemVariants.contains(v.toString())) {
+                isVariantAvailable = true;
+                break;
+            }
+        }
+
         QJsonObject resultPackage;
         resultPackage["name"] = packageName;
         resultPackage["description"] = packageObj.value("description").toString();
@@ -323,6 +334,7 @@ QJsonArray PackageManagerLib::getPackages()
         resultPackage["dependencies"] = packageObj.value("dependencies").toArray();
         resultPackage["package"] = packageFile;
         resultPackage["installed"] = isInstalled;
+        resultPackage["isVariantAvailable"] = isVariantAvailable;
         packagesArray.append(resultPackage);
     }
 
@@ -864,7 +876,7 @@ QStringList PackageManagerLib::platformVariantsToTry() const
     QString primary = currentPlatformVariant();
     QStringList variants;
     variants << primary;
-    
+
     if (primary == "linux-x86_64") {
         variants << "linux-amd64";
     } else if (primary == "linux-amd64") {
@@ -874,6 +886,14 @@ QStringList PackageManagerLib::platformVariantsToTry() const
     } else if (primary == "linux-aarch64") {
         variants << "linux-arm64";
     }
+
+#ifndef LGPM_PORTABLE_BUILD
+    QStringList devVariants;
+    for (const QString &variant : variants) {
+        devVariants << (variant + "-dev");
+    }
+    variants = devVariants;
+#endif
     
     return variants;
 }
@@ -988,6 +1008,18 @@ bool PackageManagerLib::extractLgxPackage(const QString& lgxPath, const QString&
 
     manifestFile.close();
     qDebug() << "Wrote root manifest.json to:" << manifestPath;
+
+    // Write a "variant" text file containing the installed variant name
+    QString variantFilePath = variantOutputDir + "/variant";
+    QFile variantFile(variantFilePath);
+    if (variantFile.open(QIODevice::WriteOnly)) {
+        variantFile.write(matchedVariant.toUtf8());
+        variantFile.close();
+        qDebug() << "Wrote variant file:" << variantFilePath << "=" << matchedVariant;
+    } else {
+        qWarning() << "Failed to write variant file to:" << variantFilePath;
+    }
+
     lgx_free_package(pkg);
     return true;
 }
