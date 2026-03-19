@@ -1,5 +1,5 @@
 # Builds the logos-package-manager library
-{ pkgs, common, src, logosPackageLib }:
+{ pkgs, common, src, logosPackageLib, logosSdk }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-lib";
@@ -7,7 +7,14 @@ pkgs.stdenv.mkDerivation {
   
   inherit src;
   inherit (common) nativeBuildInputs buildInputs cmakeFlags meta env;
-  
+
+  preConfigure = ''
+    echo "Running logos-cpp-generator --provider-header for package_manager..."
+    ${logosSdk}/bin/logos-cpp-generator --provider-header "$(pwd)/src/package_manager_impl.h" --output-dir "$(pwd)"
+    echo "Generated provider dispatch:"
+    ls -la logos_provider_dispatch.cpp 2>/dev/null || echo "WARNING: dispatch file not found"
+  '';
+
   installPhase = ''
     runHook preInstall
     

@@ -4,8 +4,8 @@
   inputs = {
     # Follow the same nixpkgs as logos-liblogos to ensure compatibility
     nixpkgs.follows = "logos-liblogos/nixpkgs";
-    logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
-    logos-liblogos.url = "github:logos-co/logos-liblogos";
+    logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk/refactor_p2";
+    logos-liblogos.url = "github:logos-co/logos-liblogos/refactor_p2";
     logos-package.url = "github:logos-co/logos-package";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
     nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage";
@@ -33,7 +33,7 @@
           src = ./.;
 
           # Library package (dev)
-          lib = import ./nix/lib.nix { inherit pkgs common src logosPackageLib; };
+          lib = import ./nix/lib.nix { inherit pkgs common src logosPackageLib logosSdk; };
 
           # Library package (portable)
           libPortable = import ./nix/lib.nix { inherit pkgs src logosPackageLib; common = commonPortable; };
