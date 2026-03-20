@@ -2,34 +2,34 @@
   description = "Logos Package Manager Module - Plugin manager for the Logos system";
 
   inputs = {
-    # Follow the same nixpkgs as logos-liblogos to ensure compatibility
-    nixpkgs.follows = "logos-liblogos/nixpkgs";
+    logos-nix.url = "github:logos-co/logos-nix";
+    nixpkgs.follows = "logos-nix/nixpkgs";
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
-    logos-liblogos.url = "github:logos-co/logos-liblogos";
+    logos-module.url = "github:logos-co/logos-module";
     logos-package.url = "github:logos-co/logos-package";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
     nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage";
   };
 
-  outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-package, nix-bundle-dir, nix-bundle-appimage }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-module, logos-package, nix-bundle-dir, nix-bundle-appimage }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         inherit system;
         pkgs = import nixpkgs { inherit system; };
         logosSdk = logos-cpp-sdk.packages.${system}.default;
-        logosLiblogos = logos-liblogos.packages.${system}.default;
+        logosModule = logos-module.packages.${system}.default;
         logosPackageLib = logos-package.packages.${system}.lib;
         dirBundler = nix-bundle-dir.bundlers.${system}.qtApp;
       });
     in
     {
-      packages = forAllSystems ({ pkgs, system, logosSdk, logosLiblogos, logosPackageLib, dirBundler }:
+      packages = forAllSystems ({ pkgs, system, logosSdk, logosModule, logosPackageLib, dirBundler }:
         let
           # Common configuration (dev, default)
-          common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosPackageLib; };
+          common = import ./nix/default.nix { inherit pkgs logosSdk logosModule logosPackageLib; };
           # Common configuration (portable)
-          commonPortable = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosPackageLib; portableBuild = true; };
+          commonPortable = import ./nix/default.nix { inherit pkgs logosSdk logosModule logosPackageLib; portableBuild = true; };
           src = ./.;
 
           # Library package (dev)
@@ -79,7 +79,7 @@
         }
       );
 
-      devShells = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosPackageLib }: {
+      devShells = forAllSystems ({ pkgs, logosSdk, logosModule, logosPackageLib }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.cmake
@@ -94,11 +94,11 @@
           
           shellHook = ''
             export LOGOS_CPP_SDK_ROOT="${logosSdk}"
-            export LOGOS_LIBLOGOS_ROOT="${logosLiblogos}"
+            export LOGOS_MODULE_ROOT="${logosModule}"
             export LGX_ROOT="${logosPackageLib}"
             echo "Logos Package Manager development environment"
             echo "LOGOS_CPP_SDK_ROOT: $LOGOS_CPP_SDK_ROOT"
-            echo "LOGOS_LIBLOGOS_ROOT: $LOGOS_LIBLOGOS_ROOT"
+            echo "LOGOS_MODULE_ROOT: $LOGOS_MODULE_ROOT"
             echo "LGX_ROOT: $LGX_ROOT"
           '';
         };

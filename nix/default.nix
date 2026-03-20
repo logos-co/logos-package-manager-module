@@ -1,5 +1,5 @@
 # Common build configuration shared across all packages
-{ pkgs, logosSdk, logosLiblogos, logosPackageLib, portableBuild ? false }:
+{ pkgs, logosSdk, logosModule, logosPackageLib, portableBuild ? false }:
 
 {
   pname = "logos-package-manager";
@@ -25,7 +25,7 @@
   cmakeFlags = [
     "-GNinja"
     "-DLOGOS_CPP_SDK_ROOT=${logosSdk}"
-    "-DLOGOS_LIBLOGOS_ROOT=${logosLiblogos}"
+    "-DLOGOS_MODULE_ROOT=${logosModule}"
     "-DLGX_ROOT=${logosPackageLib}"
     "-DLOGOS_PACKAGE_MANAGER_USE_VENDOR=OFF"
   ] ++ pkgs.lib.optionals portableBuild [
@@ -35,7 +35,7 @@
   # Environment variables
   env = {
     LOGOS_CPP_SDK_ROOT = "${logosSdk}";
-    LOGOS_LIBLOGOS_ROOT = "${logosLiblogos}";
+    LOGOS_MODULE_ROOT = "${logosModule}";
     LGX_ROOT = "${logosPackageLib}";
   };
 
