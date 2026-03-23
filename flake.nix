@@ -42,10 +42,10 @@
           include = import ./nix/include.nix { inherit pkgs common src lib logosSdk; };
 
           # CLI package (dev)
-          cli = import ./nix/cli.nix { inherit pkgs common src; };
+          cli = import ./nix/cli.nix { inherit pkgs common src logosSdk; };
 
           # CLI package (portable)
-          cliPortable = import ./nix/cli.nix { inherit pkgs src; common = commonPortable; };
+          cliPortable = import ./nix/cli.nix { inherit pkgs src logosSdk; common = commonPortable; };
 
           # Combined package
           combined = pkgs.symlinkJoin {
