@@ -36,7 +36,7 @@
           lib = import ./nix/lib.nix { inherit pkgs common src logosPackageLib logosSdk; };
 
           # Library package (portable)
-          libPortable = import ./nix/lib.nix { inherit pkgs src logosPackageLib; common = commonPortable; };
+          libPortable = import ./nix/lib.nix { inherit pkgs src logosPackageLib logosSdk; common = commonPortable; };
 
           # Include package (generated headers from plugin)
           include = import ./nix/include.nix { inherit pkgs common src lib logosSdk; };
