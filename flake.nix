@@ -33,7 +33,7 @@
           src = ./.;
 
           # Library package (dev)
-          lib = import ./nix/lib.nix { inherit pkgs common src logosPackageLib; };
+          lib = import ./nix/lib.nix { inherit pkgs common src logosPackageLib logosSdk; };
 
           # Library package (portable)
           libPortable = import ./nix/lib.nix { inherit pkgs src logosPackageLib; common = commonPortable; };
@@ -42,10 +42,10 @@
           include = import ./nix/include.nix { inherit pkgs common src lib logosSdk; };
 
           # CLI package (dev)
-          cli = import ./nix/cli.nix { inherit pkgs common src; };
+          cli = import ./nix/cli.nix { inherit pkgs common src logosSdk; };
 
           # CLI package (portable)
-          cliPortable = import ./nix/cli.nix { inherit pkgs src; common = commonPortable; };
+          cliPortable = import ./nix/cli.nix { inherit pkgs src logosSdk; common = commonPortable; };
 
           # Combined package
           combined = pkgs.symlinkJoin {

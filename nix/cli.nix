@@ -1,12 +1,19 @@
 # Builds the logos-package-manager CLI (lgpm)
-{ pkgs, common, src }:
+{ pkgs, common, src, logosSdk }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-cli";
   version = common.version;
-  
+
   inherit src;
   inherit (common) buildInputs cmakeFlags meta env;
+
+  preConfigure = ''
+    echo "Running logos-cpp-generator --provider-header for package_manager..."
+    ${logosSdk}/bin/logos-cpp-generator --provider-header "$(pwd)/src/package_manager_impl.h" --output-dir "$(pwd)"
+    echo "Generated provider dispatch:"
+    ls -la logos_provider_dispatch.cpp 2>/dev/null || echo "WARNING: dispatch file not found"
+  '';
   
   # Add autoPatchelfHook on Linux to fix RPATHs
   nativeBuildInputs = common.nativeBuildInputs ++
