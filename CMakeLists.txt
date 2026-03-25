@@ -13,7 +13,7 @@ if(NOT DEFINED LOGOS_MODULE_ROOT)
     set(_parent_module "${CMAKE_SOURCE_DIR}/../logos-module")
     set(_use_vendor ${LOGOS_PACKAGE_MANAGER_USE_VENDOR})
     if(NOT _use_vendor)
-        if(NOT EXISTS "${_parent_module}/src/interface.h")
+        if(NOT EXISTS "${_parent_module}/src/module_lib.h")
             set(_use_vendor ON)
         endif()
     endif()
@@ -41,10 +41,10 @@ endif()
 
 # Check if dependencies are available (support both source and installed layouts)
 set(_logos_module_found FALSE)
-if(EXISTS "${LOGOS_MODULE_ROOT}/src/interface.h")
+if(EXISTS "${LOGOS_MODULE_ROOT}/src/module_lib.h")
     set(_logos_module_found TRUE)
     set(_logos_module_is_source TRUE)
-elseif(EXISTS "${LOGOS_MODULE_ROOT}/include/module_lib/interface.h")
+elseif(EXISTS "${LOGOS_MODULE_ROOT}/include/module_lib/module_lib.h")
     set(_logos_module_found TRUE)
     set(_logos_module_is_source FALSE)
 endif()
@@ -73,24 +73,22 @@ get_filename_component(LOGOS_DEPS_ROOT "${LOGOS_CPP_SDK_ROOT}" DIRECTORY)
 
 # Find Qt RemoteObjects (needed for LogosAPI)
 if(NOT DEFINED QT_VERSION_MAJOR)
-    find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core RemoteObjects Network)
+    find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core RemoteObjects)
     if(Qt6_FOUND)
         set(QT_VERSION_MAJOR 6)
     else()
         set(QT_VERSION_MAJOR 5)
     endif()
 endif()
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core RemoteObjects Network)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core RemoteObjects)
 
 # Run Logos C++ generator on metadata before compilation
 set(METADATA_JSON "${CMAKE_CURRENT_SOURCE_DIR}/metadata.json")
 set(PLUGINS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/modules")
 
 # For iOS cross-compilation, skip the generator (it's a host tool)
-# The generated files should exist from a prior macOS build or be pre-generated
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     message(STATUS "iOS build: Skipping cpp_generator (host tool not available during cross-compilation)")
-    # Create a dummy target so dependencies still work
     add_custom_target(run_cpp_generator_package_manager
         COMMAND ${CMAKE_COMMAND} -E echo "Skipping code generator for iOS build"
         COMMENT "Skipping logos-cpp-generator for iOS cross-compilation"
@@ -99,7 +97,7 @@ elseif(_cpp_sdk_is_source)
     # Source layout: build the generator
     set(CPP_GENERATOR_BUILD_DIR "${LOGOS_DEPS_ROOT}/build/cpp-generator")
     set(CPP_GENERATOR "${CPP_GENERATOR_BUILD_DIR}/bin/logos-cpp-generator")
-    
+
     if(NOT TARGET cpp_generator_build)
         add_custom_target(cpp_generator_build
             COMMAND bash "${LOGOS_CPP_SDK_ROOT}/cpp-generator/compile.sh"
@@ -108,7 +106,7 @@ elseif(_cpp_sdk_is_source)
             VERBATIM
         )
     endif()
-    
+
     set(PROVIDER_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/package_manager_impl.h")
     add_custom_target(run_cpp_generator_package_manager
         COMMAND "${CPP_GENERATOR}" --metadata "${METADATA_JSON}" --module-dir "${PLUGINS_OUTPUT_DIR}"
@@ -122,7 +120,7 @@ elseif(_cpp_sdk_is_source)
 else()
     # Installed layout: use the generator from the install path
     find_program(CPP_GENERATOR logos-cpp-generator PATHS ${LOGOS_CPP_SDK_ROOT}/bin NO_DEFAULT_PATH REQUIRED)
-    
+
     add_custom_target(run_cpp_generator_package_manager
         COMMAND "${CPP_GENERATOR}" --metadata "${METADATA_JSON}" --module-dir "${PLUGINS_OUTPUT_DIR}"
         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -131,23 +129,21 @@ else()
     )
 endif()
 
-# Plugin sources
+# Plugin sources — uses new provider API, library provided by external logos-package-manager
 set(PROVIDER_DISPATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/logos_provider_dispatch.cpp")
 
 set(PLUGIN_SOURCES
     src/package_manager_impl.cpp
     src/package_manager_impl.h
     src/package_manager_loader.h
-    src/lib/package_manager_lib.cpp
-    src/lib/package_manager_lib.h
     ${PROVIDER_DISPATCH_FILE}
 )
 
-# Add logos-module interface header
-if(_logos_module_is_source)
-    list(APPEND PLUGIN_SOURCES ${LOGOS_MODULE_ROOT}/src/interface.h)
+# Add PluginInterface header (from logos-cpp-sdk)
+if(_cpp_sdk_is_source)
+    list(APPEND PLUGIN_SOURCES ${LOGOS_CPP_SDK_ROOT}/core/interface.h)
 else()
-    list(APPEND PLUGIN_SOURCES ${LOGOS_MODULE_ROOT}/include/module_lib/interface.h)
+    list(APPEND PLUGIN_SOURCES ${LOGOS_CPP_SDK_ROOT}/include/core/interface.h)
 endif()
 
 # Add SDK sources (only if source layout, installed layout uses the library)
@@ -173,10 +169,8 @@ if(_cpp_sdk_is_source)
 endif()
 
 # Create the plugin library
-# Build as static for iOS (dynamic libraries not supported in iOS apps), shared otherwise
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_library(package_manager_plugin STATIC ${PLUGIN_SOURCES})
-    # Enable Qt static plugin registration so Q_IMPORT_PLUGIN works
     target_compile_definitions(package_manager_plugin PRIVATE QT_STATICPLUGIN)
 else()
     add_library(package_manager_plugin SHARED ${PLUGIN_SOURCES})
@@ -195,10 +189,9 @@ set_target_properties(package_manager_plugin PROPERTIES
 add_dependencies(package_manager_plugin run_cpp_generator_package_manager)
 
 # Link Qt libraries
-target_link_libraries(package_manager_plugin PRIVATE 
-    Qt${QT_VERSION_MAJOR}::Core 
-    Qt${QT_VERSION_MAJOR}::RemoteObjects
-    Qt${QT_VERSION_MAJOR}::Network)
+target_link_libraries(package_manager_plugin PRIVATE
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::RemoteObjects)
 
 # Link SDK library if using installed layout
 if(NOT _cpp_sdk_is_source)
@@ -206,10 +199,15 @@ if(NOT _cpp_sdk_is_source)
     target_link_libraries(package_manager_plugin PRIVATE ${LOGOS_SDK_LIB})
 endif()
 
-# Add lgx library
-message(STATUS "Using lgx library at: ${LGX_ROOT}")
-target_include_directories(package_manager_plugin PRIVATE ${LGX_ROOT}/include)
-find_library(LGX_LIB lgx PATHS ${LGX_ROOT}/lib NO_DEFAULT_PATH REQUIRED)
+# Link the external logos-package-manager library
+message(STATUS "Using logos-package-manager library at: ${LOGOS_PACKAGE_MANAGER_ROOT}")
+target_include_directories(package_manager_plugin PRIVATE ${LOGOS_PACKAGE_MANAGER_ROOT}/include)
+find_library(PACKAGE_MANAGER_LIB package_manager_lib PATHS ${LOGOS_PACKAGE_MANAGER_ROOT}/lib NO_DEFAULT_PATH REQUIRED)
+message(STATUS "Found package_manager_lib: ${PACKAGE_MANAGER_LIB}")
+target_link_libraries(package_manager_plugin PRIVATE ${PACKAGE_MANAGER_LIB})
+
+# Also link liblgx from the package-manager library's bundled copy
+find_library(LGX_LIB lgx PATHS ${LOGOS_PACKAGE_MANAGER_ROOT}/lib NO_DEFAULT_PATH REQUIRED)
 message(STATUS "Found lgx library: ${LGX_LIB}")
 target_link_libraries(package_manager_plugin PRIVATE ${LGX_LIB})
 
@@ -217,7 +215,6 @@ target_link_libraries(package_manager_plugin PRIVATE ${LGX_LIB})
 target_include_directories(package_manager_plugin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
 )
 
 # Add include directories based on layout type
@@ -228,12 +225,13 @@ else()
 endif()
 
 if(_cpp_sdk_is_source)
-    target_include_directories(package_manager_plugin PRIVATE 
+    target_include_directories(package_manager_plugin PRIVATE
         ${LOGOS_CPP_SDK_ROOT}/cpp
         ${LOGOS_CPP_SDK_ROOT}/cpp/generated
+        ${LOGOS_CPP_SDK_ROOT}/core
     )
 else()
-    target_include_directories(package_manager_plugin PRIVATE 
+    target_include_directories(package_manager_plugin PRIVATE
         ${LOGOS_CPP_SDK_ROOT}/include
         ${LOGOS_CPP_SDK_ROOT}/include/cpp
         ${LOGOS_CPP_SDK_ROOT}/include/core
@@ -243,39 +241,33 @@ endif()
 # Set common properties for both platforms
 set_target_properties(package_manager_plugin PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/modules"
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/modules"  # For static libraries
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/modules"  # For Windows .dll
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/modules"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/modules"
     BUILD_WITH_INSTALL_RPATH TRUE
     SKIP_BUILD_RPATH FALSE)
 
 # Skip RPATH settings for iOS (not applicable for static libraries)
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     if(APPLE)
-        # macOS specific settings
         set_target_properties(package_manager_plugin PROPERTIES
-            INSTALL_RPATH "@loader_path;${LGX_ROOT}/lib"
+            INSTALL_RPATH "@loader_path;${LOGOS_PACKAGE_MANAGER_ROOT}/lib"
             INSTALL_NAME_DIR "@rpath"
             BUILD_WITH_INSTALL_NAME_DIR TRUE)
-        
+
         add_custom_command(TARGET package_manager_plugin POST_BUILD
             COMMAND install_name_tool -id "@rpath/package_manager_plugin.dylib" $<TARGET_FILE:package_manager_plugin>
+            COMMAND install_name_tool -change "${PACKAGE_MANAGER_LIB}" "@rpath/libpackage_manager_lib.dylib" $<TARGET_FILE:package_manager_plugin>
             COMMAND install_name_tool -change "${LGX_LIB}" "@rpath/liblgx.dylib" $<TARGET_FILE:package_manager_plugin>
             COMMENT "Updating library paths for macOS"
         )
     else()
-        # Linux specific settings
         set_target_properties(package_manager_plugin PROPERTIES
-            INSTALL_RPATH "$ORIGIN:${LGX_ROOT}/lib"
+            INSTALL_RPATH "$ORIGIN:${LOGOS_PACKAGE_MANAGER_ROOT}/lib"
             INSTALL_RPATH_USE_LINK_PATH FALSE)
     endif()
 endif()
 
-# Add CLI subdirectory (skip for iOS)
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    add_subdirectory(cmd)
-endif()
-
-# Install rules - use lib directory for iOS static libraries
+# Install rules
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     install(TARGETS package_manager_plugin
         ARCHIVE DESTINATION lib
