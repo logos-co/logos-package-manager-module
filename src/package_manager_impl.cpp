@@ -1,23 +1,16 @@
 #include "package_manager_impl.h"
-#include "lib/package_manager_lib.h"
+#include <package_manager_lib.h>
 #include <QDebug>
 #include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QFileInfo>
 
 PackageManagerImpl::PackageManagerImpl()
     : m_lib(nullptr)
 {
     qDebug() << "PackageManagerImpl created (new provider API)";
-
-    m_lib = new PackageManagerLib(nullptr);
-
-    QObject::connect(m_lib, &PackageManagerLib::pluginFileInstalled,
-        m_lib, [this](const QString& pluginPath, bool isCoreModule) {
-            onPluginFileInstalled(pluginPath, isCoreModule);
-        });
-    QObject::connect(m_lib, &PackageManagerLib::installationFinished,
-        m_lib, [this](const QString& packageName, bool success, const QString& error) {
-            onInstallationFinished(packageName, success, error);
-        });
+    m_lib = new PackageManagerLib();
 }
 
 PackageManagerImpl::~PackageManagerImpl()
@@ -31,117 +24,93 @@ void PackageManagerImpl::onInit(LogosAPI* api)
     qDebug() << "PackageManagerImpl: LogosAPI initialized (new provider API)";
 }
 
-bool PackageManagerImpl::installPlugin(const QString& pluginPath, bool skipIfNotNewerVersion)
+QVariantMap PackageManagerImpl::installPlugin(const QString& pluginPath, bool skipIfNotNewerVersion)
 {
-    QString errorMsg;
-    QString installedPath = m_lib->installPluginFile(pluginPath, errorMsg, skipIfNotNewerVersion);
-    return !installedPath.isEmpty();
+    std::string errorMsg;
+    std::string installedPluginPath;
+    bool isCoreModule = false;
+    std::string result = m_lib->installPluginFile(
+        pluginPath.toStdString(), errorMsg, skipIfNotNewerVersion,
+        &installedPluginPath, &isCoreModule
+    );
+
+    bool success = !result.empty();
+
+    if (success && !installedPluginPath.empty()) {
+        onPluginFileInstalled(QString::fromStdString(installedPluginPath), isCoreModule);
+    }
+
+    QFileInfo fi(pluginPath);
+    QVariantMap response;
+    response["name"] = fi.completeBaseName();
+    response["path"] = success ? QString::fromStdString(installedPluginPath) : QString();
+    response["isCoreModule"] = isCoreModule;
+    if (!success) {
+        response["error"] = QString::fromStdString(errorMsg);
+    }
+    return response;
 }
 
 void PackageManagerImpl::onPluginFileInstalled(const QString& pluginPath, bool isCoreModule)
 {
-    if (!isCoreModule) {
-        return;
-    }
-
-    qDebug() << "Emitting corePluginFileInstalled event for:" << pluginPath;
     QVariantList eventData;
     eventData << pluginPath;
-    emitEvent("corePluginFileInstalled", eventData);
+
+    if (isCoreModule) {
+        qDebug() << "Emitting corePluginFileInstalled event for:" << pluginPath;
+        emitEvent("corePluginFileInstalled", eventData);
+    } else {
+        qDebug() << "Emitting uiPluginFileInstalled event for:" << pluginPath;
+        emitEvent("uiPluginFileInstalled", eventData);
+    }
 }
 
-QJsonArray PackageManagerImpl::getPackages()
+static QVariantList jsonStringToVariantList(const std::string& jsonStr)
 {
-    return m_lib->getPackages();
+    QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(jsonStr));
+    return doc.array().toVariantList();
 }
 
-QJsonArray PackageManagerImpl::getPackages(const QString& category)
+QVariantList PackageManagerImpl::getInstalledPackages()
 {
-    return m_lib->getPackages(category);
+    return jsonStringToVariantList(m_lib->getInstalledPackages());
 }
 
-QStringList PackageManagerImpl::getCategories()
+QVariantList PackageManagerImpl::getInstalledModules()
 {
-    return m_lib->getCategories();
+    return jsonStringToVariantList(m_lib->getInstalledModules());
 }
 
-QStringList PackageManagerImpl::resolveDependencies(const QStringList& packageNames)
+QVariantList PackageManagerImpl::getInstalledUiPlugins()
 {
-    return m_lib->resolveDependencies(packageNames);
+    return jsonStringToVariantList(m_lib->getInstalledUiPlugins());
 }
 
-bool PackageManagerImpl::installPackage(const QString& packageName, const QString& pluginsDirectory)
+QStringList PackageManagerImpl::getValidVariants()
 {
-    qDebug() << "Installing package:" << packageName;
-    m_lib->setPluginsDirectory(pluginsDirectory);
-    return m_lib->installPackage(packageName);
+    QStringList result;
+    for (const auto& v : PackageManagerLib::platformVariantsToTry()) {
+        result << QString::fromStdString(v);
+    }
+    return result;
 }
 
-bool PackageManagerImpl::installPackages(const QStringList& packageNames, const QString& pluginsDirectory)
+void PackageManagerImpl::setEmbeddedModulesDirectory(const QString& dir)
 {
-    qDebug() << "Installing packages:" << packageNames;
-    m_lib->setPluginsDirectory(pluginsDirectory);
-    return m_lib->installPackages(packageNames);
+    m_lib->setEmbeddedModulesDirectory(dir.toStdString());
 }
 
-void PackageManagerImpl::installPackageAsync(const QString& packageName, const QString& pluginsDirectory)
+void PackageManagerImpl::setUserModulesDirectory(const QString& dir)
 {
-    qDebug() << "Installing package async:" << packageName;
-    m_lib->setPluginsDirectory(pluginsDirectory);
-    m_lib->installPackageAsync(packageName);
+    m_lib->setUserModulesDirectory(dir.toStdString());
 }
 
-void PackageManagerImpl::installPackagesAsync(const QStringList& packageNames, const QString& pluginsDirectory)
+void PackageManagerImpl::setEmbeddedUiPluginsDirectory(const QString& dir)
 {
-    qDebug() << "Installing packages async:" << packageNames;
-    m_lib->setPluginsDirectory(pluginsDirectory);
-    m_lib->installPackagesAsync(packageNames);
+    m_lib->setEmbeddedUiPluginsDirectory(dir.toStdString());
 }
 
-void PackageManagerImpl::onInstallationFinished(const QString& packageName, bool success, const QString& error)
+void PackageManagerImpl::setUserUiPluginsDirectory(const QString& dir)
 {
-    emitInstallationEvent(packageName, success, error);
-}
-
-void PackageManagerImpl::emitInstallationEvent(const QString& packageName, bool success, const QString& error)
-{
-    QVariantList eventData;
-    eventData << packageName << success << error;
-
-    qDebug() << "Emitting packageInstallationFinished event:" << packageName << success << error;
-    emitEvent("packageInstallationFinished", eventData);
-}
-
-QString PackageManagerImpl::testPluginCall(const QString& foo)
-{
-    qDebug() << "--------------------------------";
-    qDebug() << "[NEW] testPluginCall: " << foo;
-    qDebug() << "--------------------------------";
-    return "hello " + foo;
-}
-
-void PackageManagerImpl::testEvent(const QString& message)
-{
-    qDebug() << "[NEW] [LogosProviderObject] testEvent called with:" << message;
-
-    QVariantList eventData;
-    eventData << message << QDateTime::currentDateTime().toString(Qt::ISODate);
-
-    qDebug() << "[LogosProviderObject] Emitting testEventResponse via emitEvent()";
-    emitEvent("testEventResponse", eventData);
-}
-
-void PackageManagerImpl::setPluginsDirectory(const QString& pluginsDirectory)
-{
-    m_lib->setPluginsDirectory(pluginsDirectory);
-}
-
-void PackageManagerImpl::setUiPluginsDirectory(const QString& uiPluginsDirectory)
-{
-    m_lib->setUiPluginsDirectory(uiPluginsDirectory);
-}
-
-void PackageManagerImpl::setRelease(const QString& releaseTag)
-{
-    m_lib->setRelease(releaseTag);
+    m_lib->setUserUiPluginsDirectory(dir.toStdString());
 }

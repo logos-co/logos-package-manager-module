@@ -1,8 +1,8 @@
 # Common build configuration shared across all packages
-{ pkgs, logosSdk, logosModule, logosPackageLib, portableBuild ? false }:
+{ pkgs, logosSdk, logosModule, logosPackageManager, portableBuild ? false }:
 
 {
-  pname = "logos-package-manager";
+  pname = "logos-package-manager-module";
   version = "1.0.0";
 
   # Common native build inputs
@@ -17,8 +17,7 @@
   buildInputs = [
     pkgs.qt6.qtbase
     pkgs.qt6.qtremoteobjects
-    pkgs.zstd
-    logosPackageLib  # Required for liblgx.so (needed by autoPatchelfHook)
+    logosPackageManager  # Required for libpackage_manager_lib + liblgx (needed by autoPatchelfHook)
   ];
 
   # Common CMake flags
@@ -26,7 +25,7 @@
     "-GNinja"
     "-DLOGOS_CPP_SDK_ROOT=${logosSdk}"
     "-DLOGOS_MODULE_ROOT=${logosModule}"
-    "-DLGX_ROOT=${logosPackageLib}"
+    "-DLOGOS_PACKAGE_MANAGER_ROOT=${logosPackageManager}"
     "-DLOGOS_PACKAGE_MANAGER_USE_VENDOR=OFF"
   ] ++ pkgs.lib.optionals portableBuild [
     "-DLGPM_PORTABLE_BUILD=ON"
@@ -36,7 +35,7 @@
   env = {
     LOGOS_CPP_SDK_ROOT = "${logosSdk}";
     LOGOS_MODULE_ROOT = "${logosModule}";
-    LGX_ROOT = "${logosPackageLib}";
+    LOGOS_PACKAGE_MANAGER_ROOT = "${logosPackageManager}";
   };
 
   # Metadata
@@ -45,4 +44,3 @@
     platforms = platforms.unix;
   };
 }
-
