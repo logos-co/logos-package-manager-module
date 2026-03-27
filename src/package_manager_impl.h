@@ -22,10 +22,14 @@ public:
     // Install from local LGX file — returns QVariantMap {name, path, error, isCoreModule}
     LOGOS_METHOD QVariantMap installPlugin(const QString& pluginPath, bool skipIfNotNewerVersion);
 
-    // Directory configuration (4-directory model)
+    // Directory configuration — embedded (multiple, read-only)
     LOGOS_METHOD void setEmbeddedModulesDirectory(const QString& dir);
-    LOGOS_METHOD void setUserModulesDirectory(const QString& dir);
+    LOGOS_METHOD void addEmbeddedModulesDirectory(const QString& dir);
     LOGOS_METHOD void setEmbeddedUiPluginsDirectory(const QString& dir);
+    LOGOS_METHOD void addEmbeddedUiPluginsDirectory(const QString& dir);
+
+    // Directory configuration — user (single, writable)
+    LOGOS_METHOD void setUserModulesDirectory(const QString& dir);
     LOGOS_METHOD void setUserUiPluginsDirectory(const QString& dir);
 
     // Scanning — each returns JSON array with all manifest fields + installDir + mainFilePath

@@ -100,14 +100,24 @@ void PackageManagerImpl::setEmbeddedModulesDirectory(const QString& dir)
     m_lib->setEmbeddedModulesDirectory(dir.toStdString());
 }
 
-void PackageManagerImpl::setUserModulesDirectory(const QString& dir)
+void PackageManagerImpl::addEmbeddedModulesDirectory(const QString& dir)
 {
-    m_lib->setUserModulesDirectory(dir.toStdString());
+    m_lib->addEmbeddedModulesDirectory(dir.toStdString());
 }
 
 void PackageManagerImpl::setEmbeddedUiPluginsDirectory(const QString& dir)
 {
     m_lib->setEmbeddedUiPluginsDirectory(dir.toStdString());
+}
+
+void PackageManagerImpl::addEmbeddedUiPluginsDirectory(const QString& dir)
+{
+    m_lib->addEmbeddedUiPluginsDirectory(dir.toStdString());
+}
+
+void PackageManagerImpl::setUserModulesDirectory(const QString& dir)
+{
+    m_lib->setUserModulesDirectory(dir.toStdString());
 }
 
 void PackageManagerImpl::setUserUiPluginsDirectory(const QString& dir)

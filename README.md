@@ -10,13 +10,22 @@ The underlying `logos-package-manager` library is plain C++17 (no Qt). This modu
 
 All methods are accessible via LogosAPI from other modules and UI plugins.
 
-### Directory Configuration (4-directory model)
+### Directory Configuration
+
+**Embedded directories** (multiple, read-only at runtime):
 
 | Method | Description |
 |--------|-------------|
-| `setEmbeddedModulesDirectory(dir)` | Set directory for bundled core modules |
+| `setEmbeddedModulesDirectory(dir)` | Clear and set a single embedded modules directory |
+| `addEmbeddedModulesDirectory(dir)` | Append an additional embedded modules directory |
+| `setEmbeddedUiPluginsDirectory(dir)` | Clear and set a single embedded UI plugins directory |
+| `addEmbeddedUiPluginsDirectory(dir)` | Append an additional embedded UI plugins directory |
+
+**User directories** (single, writable, where new packages are installed):
+
+| Method | Description |
+|--------|-------------|
 | `setUserModulesDirectory(dir)` | Set directory for user-installed core modules |
-| `setEmbeddedUiPluginsDirectory(dir)` | Set directory for bundled UI plugins |
 | `setUserUiPluginsDirectory(dir)` | Set directory for user-installed UI plugins |
 
 ### Installation
@@ -48,10 +57,13 @@ Each item in the scan results contains all `manifest.json` fields plus `installD
 ```cpp
 LogosModules logos(logosAPI);
 
-// Configure directories
+// Configure embedded directories (multiple, read-only)
 logos.package_manager.setEmbeddedModulesDirectory("/app/modules");
-logos.package_manager.setUserModulesDirectory("/home/user/.logos/modules");
+logos.package_manager.addEmbeddedModulesDirectory("/app/extra-modules");
 logos.package_manager.setEmbeddedUiPluginsDirectory("/app/ui-plugins");
+
+// Configure user directories (single, writable)
+logos.package_manager.setUserModulesDirectory("/home/user/.logos/modules");
 logos.package_manager.setUserUiPluginsDirectory("/home/user/.logos/ui-plugins");
 
 // Scan installed packages
