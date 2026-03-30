@@ -103,13 +103,16 @@ if (!result.contains("error")) {
 
 ## Building
 
+Uses [logos-module-builder](https://github.com/logos-co/logos-module-builder) for minimal build configuration.
+
 ```bash
-nix build          # module plugin (lib + include)
-nix build .#lib    # plugin .so/.dylib only
+nix build                # module plugin (lib + include)
+nix build .#lib          # plugin .so/.dylib only
+nix build .#lgx          # .lgx package
+nix build .#lgx-portable # portable .lgx package
 ```
 
 ## Dependencies
 
-- `logos-cpp-sdk` — SDK, LogosAPI, IPC
-- `logos-module` — plugin introspection
+- `logos-module-builder` — shared Nix/CMake build infrastructure
 - `logos-package-manager` — package management library (plain C++, linked at build time)

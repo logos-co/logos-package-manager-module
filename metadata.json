@@ -1,20 +1,21 @@
 {
   "name": "package_manager",
   "version": "1.0.0",
-  "description": "Plugin manager",
+  "description": "Plugin manager for the Logos system",
   "author": "Logos Core Team",
   "type": "core",
   "category": "management",
   "main": "package_manager_plugin",
   "dependencies": [],
-  "build": {
-    "type": "cmake",
-    "files": [
-      "package_manager_plugin.cpp",
-      "package_manager_plugin.h"
-    ]
-  },
-  "capabilities": [
-    "plugin_installation"
-  ]
-} 
+  "include": [],
+  "capabilities": ["plugin_installation"],
+
+  "nix": {
+    "external_libraries": [
+      { "name": "logos_pm", "build_command": "true" }
+    ],
+    "cmake": {
+      "extra_include_dirs": ["lib"]
+    }
+  }
+}
