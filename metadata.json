@@ -12,7 +12,7 @@
 
   "nix": {
     "external_libraries": [
-      { "name": "logos_pm", "build_command": "true" }
+      { "name": "logos_pm" }
     ],
     "cmake": {
       "extra_include_dirs": ["lib"]
