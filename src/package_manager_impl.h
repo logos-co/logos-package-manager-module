@@ -40,6 +40,14 @@ public:
     // Platform variants this build accepts (e.g. ["darwin-arm64-dev"] or ["darwin-arm64"])
     LOGOS_METHOD QStringList getValidVariants();
 
+    // Signature policy configuration
+    LOGOS_METHOD void setSignaturePolicy(const QString& policy);
+    LOGOS_METHOD void setKeyringDirectory(const QString& dir);
+    LOGOS_METHOD void setTofuEnabled(bool enabled);
+
+    // Standalone signature verification — returns {isSigned, signatureValid, packageValid, signerDid, signerName, signerUrl, trustedAs, error}
+    LOGOS_METHOD QVariantMap verifyPackage(const QString& lgxPath);
+
 private:
     PackageManagerLib* m_lib;
 

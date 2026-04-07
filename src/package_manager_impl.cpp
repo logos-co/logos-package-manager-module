@@ -40,6 +40,9 @@ QVariantMap PackageManagerImpl::installPlugin(const QString& pluginPath, bool sk
         onPluginFileInstalled(QString::fromStdString(installedPluginPath), isCoreModule);
     }
 
+    // Get signature info for the response
+    auto sigResult = m_lib->verifyPackageSignature(pluginPath.toStdString());
+
     QFileInfo fi(pluginPath);
     QVariantMap response;
     response["name"] = fi.completeBaseName();
@@ -48,6 +51,25 @@ QVariantMap PackageManagerImpl::installPlugin(const QString& pluginPath, bool sk
     if (!success) {
         response["error"] = QString::fromStdString(errorMsg);
     }
+
+    // Add signature info
+    if (sigResult.is_signed) {
+        response["signatureStatus"] = sigResult.signature_valid && sigResult.package_valid
+            ? QString("signed") : QString("invalid");
+        response["signerDid"] = QString::fromStdString(sigResult.signer_did);
+        if (!sigResult.signer_name.empty()) {
+            response["signerName"] = QString::fromStdString(sigResult.signer_name);
+        }
+        if (!sigResult.signer_url.empty()) {
+            response["signerUrl"] = QString::fromStdString(sigResult.signer_url);
+        }
+        if (!sigResult.trusted_as.empty()) {
+            response["trustedAs"] = QString::fromStdString(sigResult.trusted_as);
+        }
+    } else {
+        response["signatureStatus"] = QString("unsigned");
+    }
+
     return response;
 }
 
@@ -123,4 +145,40 @@ void PackageManagerImpl::setUserModulesDirectory(const QString& dir)
 void PackageManagerImpl::setUserUiPluginsDirectory(const QString& dir)
 {
     m_lib->setUserUiPluginsDirectory(dir.toStdString());
+}
+
+void PackageManagerImpl::setSignaturePolicy(const QString& policy)
+{
+    std::string p = policy.toLower().toStdString();
+    if (p == "none") m_lib->setSignaturePolicy(SignaturePolicy::NONE);
+    else if (p == "warn") m_lib->setSignaturePolicy(SignaturePolicy::WARN);
+    else if (p == "require") m_lib->setSignaturePolicy(SignaturePolicy::REQUIRE);
+}
+
+void PackageManagerImpl::setKeyringDirectory(const QString& dir)
+{
+    m_lib->setKeyringDirectory(dir.toStdString());
+}
+
+void PackageManagerImpl::setTofuEnabled(bool enabled)
+{
+    m_lib->setTofuEnabled(enabled);
+}
+
+QVariantMap PackageManagerImpl::verifyPackage(const QString& lgxPath)
+{
+    auto result = m_lib->verifyPackageSignature(lgxPath.toStdString());
+
+    QVariantMap response;
+    response["isSigned"] = result.is_signed;
+    response["signatureValid"] = result.signature_valid;
+    response["packageValid"] = result.package_valid;
+    response["signerDid"] = QString::fromStdString(result.signer_did);
+    response["signerName"] = QString::fromStdString(result.signer_name);
+    response["signerUrl"] = QString::fromStdString(result.signer_url);
+    response["trustedAs"] = QString::fromStdString(result.trusted_as);
+    if (!result.error.empty()) {
+        response["error"] = QString::fromStdString(result.error);
+    }
+    return response;
 }
