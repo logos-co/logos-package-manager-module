@@ -51,8 +51,15 @@ Each item in the scan results contains all `manifest.json` fields plus `installD
 |--------|-------------|
 | `setSignaturePolicy(policy)` | Set policy: `"none"`, `"warn"` (default), or `"require"` |
 | `setKeyringDirectory(dir)` | Override trusted keys directory (default: `~/.config/logos/trusted-keys/`) |
-| `setTofuEnabled(enabled)` | Enable Trust On First Use for unknown signing keys |
 | `verifyPackage(lgxPath)` | Standalone verification. Returns `{isSigned, signatureValid, packageValid, signerDid, signerName, signerUrl, trustedAs, error}` |
+
+### Keyring Management
+
+| Method | Return | Description |
+|--------|--------|-------------|
+| `addTrustedKey(name, did, displayName, url)` | `QVariantMap` | Add a trusted signing key. Returns `{success, error}` |
+| `removeTrustedKey(name)` | `QVariantMap` | Remove a trusted key by name. Returns `{success, error}` |
+| `listTrustedKeys()` | `QVariantList` | List all trusted keys. Each entry: `{name, did, displayName, url, addedAt}` |
 
 ### Events
 
@@ -83,7 +90,12 @@ QVariantList uiPlugins = logos.package_manager.getInstalledUiPlugins();
 // Configure signature policy
 logos.package_manager.setSignaturePolicy("require");
 logos.package_manager.setKeyringDirectory("/home/user/.config/logos/trusted-keys");
-logos.package_manager.setTofuEnabled(false);
+
+// Manage trusted signing keys
+logos.package_manager.addTrustedKey("logos-official", "did:jwk:eyJj...", "Logos Foundation", "https://logos.co");
+QVariantList keys = logos.package_manager.listTrustedKeys();
+// Each entry: {name, did, displayName, url, addedAt}
+logos.package_manager.removeTrustedKey("logos-official");
 
 // Verify a package before installing
 QVariantMap sigInfo = logos.package_manager.verifyPackage("/path/to/waku_module.lgx");

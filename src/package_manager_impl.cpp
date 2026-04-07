@@ -1,5 +1,6 @@
 #include "package_manager_impl.h"
 #include <package_manager_lib.h>
+#include <lgx.h>
 #include <QDebug>
 #include <QDateTime>
 #include <QJsonDocument>
@@ -160,11 +161,6 @@ void PackageManagerImpl::setKeyringDirectory(const QString& dir)
     m_lib->setKeyringDirectory(dir.toStdString());
 }
 
-void PackageManagerImpl::setTofuEnabled(bool enabled)
-{
-    m_lib->setTofuEnabled(enabled);
-}
-
 QVariantMap PackageManagerImpl::verifyPackage(const QString& lgxPath)
 {
     auto result = m_lib->verifyPackageSignature(lgxPath.toStdString());
@@ -181,4 +177,66 @@ QVariantMap PackageManagerImpl::verifyPackage(const QString& lgxPath)
         response["error"] = QString::fromStdString(result.error);
     }
     return response;
+}
+
+QVariantMap PackageManagerImpl::addTrustedKey(const QString& name, const QString& did,
+                                               const QString& displayName, const QString& url)
+{
+    std::string keyringDir = m_lib->keyringDirectory();
+    const char* keyringDirPtr = keyringDir.empty() ? nullptr : keyringDir.c_str();
+
+    lgx_result_t result = lgx_keyring_add(
+        keyringDirPtr,
+        name.toStdString().c_str(),
+        did.toStdString().c_str(),
+        displayName.isEmpty() ? nullptr : displayName.toStdString().c_str(),
+        url.isEmpty() ? nullptr : url.toStdString().c_str()
+    );
+
+    QVariantMap response;
+    response["success"] = result.success;
+    if (!result.success && result.error) {
+        response["error"] = QString::fromUtf8(result.error);
+    }
+    return response;
+}
+
+QVariantMap PackageManagerImpl::removeTrustedKey(const QString& name)
+{
+    std::string keyringDir = m_lib->keyringDirectory();
+    const char* keyringDirPtr = keyringDir.empty() ? nullptr : keyringDir.c_str();
+
+    lgx_result_t result = lgx_keyring_remove(
+        keyringDirPtr,
+        name.toStdString().c_str()
+    );
+
+    QVariantMap response;
+    response["success"] = result.success;
+    if (!result.success && result.error) {
+        response["error"] = QString::fromUtf8(result.error);
+    }
+    return response;
+}
+
+QVariantList PackageManagerImpl::listTrustedKeys()
+{
+    std::string keyringDir = m_lib->keyringDirectory();
+    const char* keyringDirPtr = keyringDir.empty() ? nullptr : keyringDir.c_str();
+
+    lgx_keyring_list_t list = lgx_keyring_list(keyringDirPtr);
+
+    QVariantList result;
+    for (size_t i = 0; i < list.count; ++i) {
+        QVariantMap entry;
+        if (list.keys[i].name) entry["name"] = QString::fromUtf8(list.keys[i].name);
+        if (list.keys[i].did) entry["did"] = QString::fromUtf8(list.keys[i].did);
+        if (list.keys[i].display_name) entry["displayName"] = QString::fromUtf8(list.keys[i].display_name);
+        if (list.keys[i].url) entry["url"] = QString::fromUtf8(list.keys[i].url);
+        if (list.keys[i].added_at) entry["addedAt"] = QString::fromUtf8(list.keys[i].added_at);
+        result.append(entry);
+    }
+
+    lgx_free_keyring_list(list);
+    return result;
 }
