@@ -67,6 +67,9 @@ QVariantMap PackageManagerImpl::installPlugin(const QString& pluginPath, bool sk
         if (!sigResult.trusted_as.empty()) {
             response["trustedAs"] = QString::fromStdString(sigResult.trusted_as);
         }
+    } else if (!sigResult.error.empty()) {
+        response["signatureStatus"] = QString("error");
+        response["signatureError"] = QString::fromStdString(sigResult.error);
     } else {
         response["signatureStatus"] = QString("unsigned");
     }
@@ -154,6 +157,10 @@ void PackageManagerImpl::setSignaturePolicy(const QString& policy)
     if (p == "none") m_lib->setSignaturePolicy(SignaturePolicy::NONE);
     else if (p == "warn") m_lib->setSignaturePolicy(SignaturePolicy::WARN);
     else if (p == "require") m_lib->setSignaturePolicy(SignaturePolicy::REQUIRE);
+    else {
+        qWarning() << "PackageManagerImpl::setSignaturePolicy: invalid policy"
+                    << policy << "- expected one of: none, warn, require";
+    }
 }
 
 void PackageManagerImpl::setKeyringDirectory(const QString& dir)

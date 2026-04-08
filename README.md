@@ -32,7 +32,7 @@ All methods are accessible via LogosAPI from other modules and UI plugins.
 
 | Method | Return | Description |
 |--------|--------|-------------|
-| `installPlugin(path, skipIfNotNewer)` | `QVariantMap` | Install a local `.lgx` file. Returns `{name, path, isCoreModule, signatureStatus, signerDid, signerName, signerUrl, trustedAs, error}` |
+| `installPlugin(path, skipIfNotNewer)` | `QVariantMap` | Install a local `.lgx` file. Returns `{name, path, isCoreModule, signatureStatus, error}`. When `signatureStatus` is `"signed"` or `"invalid"`, also includes `signerDid`, `signerName`, `signerUrl`, `trustedAs`. When `signatureStatus` is `"error"`, includes `signatureError`. |
 
 ### Scanning
 
