@@ -1,5 +1,6 @@
 #include "package_manager_impl.h"
 #include <package_manager_lib.h>
+#include <lgx.h>
 #include <QDebug>
 #include <QDateTime>
 #include <QJsonDocument>
@@ -40,6 +41,9 @@ QVariantMap PackageManagerImpl::installPlugin(const QString& pluginPath, bool sk
         onPluginFileInstalled(QString::fromStdString(installedPluginPath), isCoreModule);
     }
 
+    // Get signature info for the response
+    auto sigResult = m_lib->verifyPackageSignature(pluginPath.toStdString());
+
     QFileInfo fi(pluginPath);
     QVariantMap response;
     response["name"] = fi.completeBaseName();
@@ -48,6 +52,28 @@ QVariantMap PackageManagerImpl::installPlugin(const QString& pluginPath, bool sk
     if (!success) {
         response["error"] = QString::fromStdString(errorMsg);
     }
+
+    // Add signature info
+    if (sigResult.is_signed) {
+        response["signatureStatus"] = sigResult.signature_valid && sigResult.package_valid
+            ? QString("signed") : QString("invalid");
+        response["signerDid"] = QString::fromStdString(sigResult.signer_did);
+        if (!sigResult.signer_name.empty()) {
+            response["signerName"] = QString::fromStdString(sigResult.signer_name);
+        }
+        if (!sigResult.signer_url.empty()) {
+            response["signerUrl"] = QString::fromStdString(sigResult.signer_url);
+        }
+        if (!sigResult.trusted_as.empty()) {
+            response["trustedAs"] = QString::fromStdString(sigResult.trusted_as);
+        }
+    } else if (!sigResult.error.empty()) {
+        response["signatureStatus"] = QString("error");
+        response["signatureError"] = QString::fromStdString(sigResult.error);
+    } else {
+        response["signatureStatus"] = QString("unsigned");
+    }
+
     return response;
 }
 
@@ -123,4 +149,101 @@ void PackageManagerImpl::setUserModulesDirectory(const QString& dir)
 void PackageManagerImpl::setUserUiPluginsDirectory(const QString& dir)
 {
     m_lib->setUserUiPluginsDirectory(dir.toStdString());
+}
+
+void PackageManagerImpl::setSignaturePolicy(const QString& policy)
+{
+    std::string p = policy.toLower().toStdString();
+    if (p == "none") m_lib->setSignaturePolicy(SignaturePolicy::NONE);
+    else if (p == "warn") m_lib->setSignaturePolicy(SignaturePolicy::WARN);
+    else if (p == "require") m_lib->setSignaturePolicy(SignaturePolicy::REQUIRE);
+    else {
+        qWarning() << "PackageManagerImpl::setSignaturePolicy: invalid policy"
+                    << policy << "- expected one of: none, warn, require";
+    }
+}
+
+void PackageManagerImpl::setKeyringDirectory(const QString& dir)
+{
+    m_lib->setKeyringDirectory(dir.toStdString());
+}
+
+QVariantMap PackageManagerImpl::verifyPackage(const QString& lgxPath)
+{
+    auto result = m_lib->verifyPackageSignature(lgxPath.toStdString());
+
+    QVariantMap response;
+    response["isSigned"] = result.is_signed;
+    response["signatureValid"] = result.signature_valid;
+    response["packageValid"] = result.package_valid;
+    response["signerDid"] = QString::fromStdString(result.signer_did);
+    response["signerName"] = QString::fromStdString(result.signer_name);
+    response["signerUrl"] = QString::fromStdString(result.signer_url);
+    response["trustedAs"] = QString::fromStdString(result.trusted_as);
+    if (!result.error.empty()) {
+        response["error"] = QString::fromStdString(result.error);
+    }
+    return response;
+}
+
+QVariantMap PackageManagerImpl::addTrustedKey(const QString& name, const QString& did,
+                                               const QString& displayName, const QString& url)
+{
+    std::string keyringDir = m_lib->keyringDirectory();
+    const char* keyringDirPtr = keyringDir.empty() ? nullptr : keyringDir.c_str();
+
+    lgx_result_t result = lgx_keyring_add(
+        keyringDirPtr,
+        name.toStdString().c_str(),
+        did.toStdString().c_str(),
+        displayName.isEmpty() ? nullptr : displayName.toStdString().c_str(),
+        url.isEmpty() ? nullptr : url.toStdString().c_str()
+    );
+
+    QVariantMap response;
+    response["success"] = result.success;
+    if (!result.success && result.error) {
+        response["error"] = QString::fromUtf8(result.error);
+    }
+    return response;
+}
+
+QVariantMap PackageManagerImpl::removeTrustedKey(const QString& name)
+{
+    std::string keyringDir = m_lib->keyringDirectory();
+    const char* keyringDirPtr = keyringDir.empty() ? nullptr : keyringDir.c_str();
+
+    lgx_result_t result = lgx_keyring_remove(
+        keyringDirPtr,
+        name.toStdString().c_str()
+    );
+
+    QVariantMap response;
+    response["success"] = result.success;
+    if (!result.success && result.error) {
+        response["error"] = QString::fromUtf8(result.error);
+    }
+    return response;
+}
+
+QVariantList PackageManagerImpl::listTrustedKeys()
+{
+    std::string keyringDir = m_lib->keyringDirectory();
+    const char* keyringDirPtr = keyringDir.empty() ? nullptr : keyringDir.c_str();
+
+    lgx_keyring_list_t list = lgx_keyring_list(keyringDirPtr);
+
+    QVariantList result;
+    for (size_t i = 0; i < list.count; ++i) {
+        QVariantMap entry;
+        if (list.keys[i].name) entry["name"] = QString::fromUtf8(list.keys[i].name);
+        if (list.keys[i].did) entry["did"] = QString::fromUtf8(list.keys[i].did);
+        if (list.keys[i].display_name) entry["displayName"] = QString::fromUtf8(list.keys[i].display_name);
+        if (list.keys[i].url) entry["url"] = QString::fromUtf8(list.keys[i].url);
+        if (list.keys[i].added_at) entry["addedAt"] = QString::fromUtf8(list.keys[i].added_at);
+        result.append(entry);
+    }
+
+    lgx_free_keyring_list(list);
+    return result;
 }

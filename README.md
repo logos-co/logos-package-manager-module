@@ -32,7 +32,7 @@ All methods are accessible via LogosAPI from other modules and UI plugins.
 
 | Method | Return | Description |
 |--------|--------|-------------|
-| `installPlugin(path, skipIfNotNewer)` | `QVariantMap` | Install a local `.lgx` file. Returns `{name, path, isCoreModule, error}` |
+| `installPlugin(path, skipIfNotNewer)` | `QVariantMap` | Install a local `.lgx` file. Returns `{name, path, isCoreModule, signatureStatus, error}`. When `signatureStatus` is `"signed"` or `"invalid"`, also includes `signerDid`, `signerName`, `signerUrl`, `trustedAs`. When `signatureStatus` is `"error"`, includes `signatureError`. |
 
 ### Scanning
 
@@ -44,6 +44,22 @@ All methods are accessible via LogosAPI from other modules and UI plugins.
 | `getValidVariants()` | `QStringList` | Platform variants this build accepts (e.g. `["darwin-arm64-dev"]`) |
 
 Each item in the scan results contains all `manifest.json` fields plus `installDir` and `mainFilePath`.
+
+### Signature Policy
+
+| Method | Description |
+|--------|-------------|
+| `setSignaturePolicy(policy)` | Set policy: `"none"`, `"warn"` (default), or `"require"` |
+| `setKeyringDirectory(dir)` | Override trusted keys directory (default: `~/.config/logos/trusted-keys/`) |
+| `verifyPackage(lgxPath)` | Standalone verification. Returns `{isSigned, signatureValid, packageValid, signerDid, signerName, signerUrl, trustedAs, error}` |
+
+### Keyring Management
+
+| Method | Return | Description |
+|--------|--------|-------------|
+| `addTrustedKey(name, did, displayName, url)` | `QVariantMap` | Add a trusted signing key. Returns `{success, error}` |
+| `removeTrustedKey(name)` | `QVariantMap` | Remove a trusted key by name. Returns `{success, error}` |
+| `listTrustedKeys()` | `QVariantList` | List all trusted keys. Each entry: `{name, did, displayName, url, addedAt}` |
 
 ### Events
 
@@ -71,11 +87,26 @@ QVariantList all = logos.package_manager.getInstalledPackages();
 QVariantList modules = logos.package_manager.getInstalledModules();
 QVariantList uiPlugins = logos.package_manager.getInstalledUiPlugins();
 
+// Configure signature policy
+logos.package_manager.setSignaturePolicy("require");
+logos.package_manager.setKeyringDirectory("/home/user/.config/logos/trusted-keys");
+
+// Manage trusted signing keys
+logos.package_manager.addTrustedKey("logos-official", "did:jwk:eyJj...", "Logos Foundation", "https://logos.co");
+QVariantList keys = logos.package_manager.listTrustedKeys();
+// Each entry: {name, did, displayName, url, addedAt}
+logos.package_manager.removeTrustedKey("logos-official");
+
+// Verify a package before installing
+QVariantMap sigInfo = logos.package_manager.verifyPackage("/path/to/waku_module.lgx");
+// sigInfo: {isSigned, signatureValid, packageValid, signerDid, signerName, signerUrl, trustedAs, error}
+
 // Install a downloaded .lgx file
 QVariantMap result = logos.package_manager.installPlugin("/path/to/waku_module.lgx", false);
 if (result.contains("error")) {
     qWarning() << "Install failed:" << result["error"].toString();
 }
+// result also includes: signatureStatus ("signed"/"unsigned"/"invalid"), signerDid, signerName, signerUrl, trustedAs
 
 // Listen for installation events
 logos.package_manager.on("corePluginFileInstalled", [](const QVariantList& data) {
