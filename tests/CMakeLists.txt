@@ -13,6 +13,7 @@ logos_test(
         test_package_manager.cpp
     MOCK_C_SOURCES
         mocks/mock_package_manager_lib.cpp
+        mocks/mock_lgx.cpp
     EXTRA_INCLUDES
         stubs
     GENERATED_SOURCES

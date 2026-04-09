@@ -28,6 +28,8 @@ LOGOS_TEST(installPlugin_success_core_emits_core_event) {
     LOGOS_ASSERT_TRUE(m[QStringLiteral("isCoreModule")].toBool());
     LOGOS_ASSERT_FALSE(m.contains(QStringLiteral("error")));
     LOGOS_ASSERT_EQ(m[QStringLiteral("name")].toString(), QStringLiteral("foo"));
+    LOGOS_ASSERT_EQ(m[QStringLiteral("signatureStatus")].toString(), QStringLiteral("unsigned"));
+    LOGOS_ASSERT_TRUE(t.cFunctionCalled("verifyPackageSignature"));
     LOGOS_ASSERT_TRUE(t.eventEmitted("corePluginFileInstalled"));
     LOGOS_ASSERT_FALSE(t.eventEmitted("uiPluginFileInstalled"));
     LOGOS_ASSERT_TRUE(t.cFunctionCalled("installPluginFile"));
@@ -208,4 +210,38 @@ LOGOS_TEST(no_cross_module_calls_by_default) {
     PackageManagerImpl impl;
     t.init(&impl);
     LOGOS_ASSERT_EQ(t.moduleCallCount("capability_module", "requestModule"), 0);
+}
+
+LOGOS_TEST(setSignaturePolicy_forwards_to_lib) {
+    auto t = LogosTestContext("package_manager");
+    PackageManagerImpl impl;
+    t.init(&impl);
+    impl.setSignaturePolicy(QStringLiteral("warn"));
+    LOGOS_ASSERT_TRUE(t.cFunctionCalled("setSignaturePolicy"));
+}
+
+LOGOS_TEST(setKeyringDirectory_forwards_to_lib) {
+    auto t = LogosTestContext("package_manager");
+    PackageManagerImpl impl;
+    t.init(&impl);
+    impl.setKeyringDirectory(QStringLiteral("/kr"));
+    LOGOS_ASSERT_TRUE(t.cFunctionCalled("setKeyringDirectory"));
+}
+
+LOGOS_TEST(verifyPackage_maps_signature_result) {
+    auto t = LogosTestContext("package_manager");
+    t.mockCFunction("verifyPackageSignature_is_signed").returns(true);
+    t.mockCFunction("verifyPackageSignature_signature_valid").returns(true);
+    t.mockCFunction("verifyPackageSignature_package_valid").returns(true);
+    t.mockCFunction("verifyPackageSignature_signer_did").returns("did:jwk:test");
+
+    PackageManagerImpl impl;
+    t.init(&impl);
+
+    QVariantMap m = impl.verifyPackage(QStringLiteral("/any.lgx"));
+    LOGOS_ASSERT_TRUE(m[QStringLiteral("isSigned")].toBool());
+    LOGOS_ASSERT_TRUE(m[QStringLiteral("signatureValid")].toBool());
+    LOGOS_ASSERT_TRUE(m[QStringLiteral("packageValid")].toBool());
+    LOGOS_ASSERT_EQ(m[QStringLiteral("signerDid")].toString(), QStringLiteral("did:jwk:test"));
+    LOGOS_ASSERT_TRUE(t.cFunctionCalled("verifyPackageSignature"));
 }

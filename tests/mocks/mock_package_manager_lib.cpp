@@ -95,3 +95,48 @@ std::vector<std::string> PackageManagerLib::platformVariantsToTry() {
     }
     return {"mock-variant"};
 }
+
+void PackageManagerLib::setSignaturePolicy(SignaturePolicy policy) {
+    LOGOS_CMOCK_RECORD("setSignaturePolicy");
+    (void)policy;
+}
+
+void PackageManagerLib::setKeyringDirectory(const std::string& dir) {
+    LOGOS_CMOCK_RECORD("setKeyringDirectory");
+    (void)dir;
+}
+
+std::string PackageManagerLib::keyringDirectory() {
+    LOGOS_CMOCK_RECORD("keyringDirectory");
+    return mockDupCStr("keyringDirectory", "");
+}
+
+SignatureVerificationResult PackageManagerLib::verifyPackageSignature(const std::string& lgxPath) {
+    LOGOS_CMOCK_RECORD("verifyPackageSignature");
+    (void)lgxPath;
+    SignatureVerificationResult r;
+    r.is_signed = LOGOS_CMOCK_RETURN(bool, "verifyPackageSignature_is_signed");
+    r.signature_valid = LOGOS_CMOCK_RETURN(bool, "verifyPackageSignature_signature_valid");
+    r.package_valid = LOGOS_CMOCK_RETURN(bool, "verifyPackageSignature_package_valid");
+    const char* did = LOGOS_CMOCK_RETURN_STRING("verifyPackageSignature_signer_did");
+    if (did && did[0]) {
+        r.signer_did = did;
+    }
+    const char* name = LOGOS_CMOCK_RETURN_STRING("verifyPackageSignature_signer_name");
+    if (name && name[0]) {
+        r.signer_name = name;
+    }
+    const char* url = LOGOS_CMOCK_RETURN_STRING("verifyPackageSignature_signer_url");
+    if (url && url[0]) {
+        r.signer_url = url;
+    }
+    const char* trusted = LOGOS_CMOCK_RETURN_STRING("verifyPackageSignature_trusted_as");
+    if (trusted && trusted[0]) {
+        r.trusted_as = trusted;
+    }
+    const char* err = LOGOS_CMOCK_RETURN_STRING("verifyPackageSignature_error");
+    if (err && err[0]) {
+        r.error = err;
+    }
+    return r;
+}
