@@ -4,6 +4,7 @@
   "description": "Plugin manager for the Logos system",
   "author": "Logos Core Team",
   "type": "core",
+  "interface": "provider",
   "category": "management",
   "main": "package_manager_plugin",
   "dependencies": [],
