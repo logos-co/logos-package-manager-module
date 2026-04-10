@@ -8,26 +8,24 @@
 #include <QDir>
 #include <QTemporaryDir>
 #include <QFile>
+#include <algorithm>
 
 /**
  * Helper: read DID from a .did file.
  */
-static QString readDid(const QString& keysDir, const QString& keyName) {
+static std::string readDid(const QString& keysDir, const QString& keyName) {
     QFile f(keysDir + "/" + keyName + ".did");
     if (!f.open(QIODevice::ReadOnly)) return {};
-    return QString::fromUtf8(f.readAll()).trimmed();
+    return QString::fromUtf8(f.readAll()).trimmed().toStdString();
 }
 
 /**
  * Helper: generate a keypair and return the DID.
  */
-static QString generateKeyAndGetDid(const QString& keysDir, const QString& keyName) {
+static std::string generateKeyAndGetDid(const QString& keysDir, const QString& keyName) {
     lgx_result_t res = lgx_keygen(keyName.toStdString().c_str(), keysDir.toStdString().c_str());
     if (!res.success) return {};
-
-    QFile f(keysDir + "/" + keyName + ".did");
-    if (!f.open(QIODevice::ReadOnly)) return {};
-    return QString::fromUtf8(f.readAll()).trimmed();
+    return readDid(keysDir, keyName);
 }
 
 // =============================================================================
@@ -35,9 +33,7 @@ static QString generateKeyAndGetDid(const QString& keysDir, const QString& keyNa
 // =============================================================================
 
 LOGOS_TEST(add_trusted_key_success) {
-    auto t = LogosTestContext("package_manager");
     PackageManagerImpl impl;
-    t.init(&impl);
 
     QTemporaryDir tmpDir;
     LOGOS_ASSERT_TRUE(tmpDir.isValid());
@@ -47,19 +43,17 @@ LOGOS_TEST(add_trusted_key_success) {
     QDir().mkpath(keysDir);
     QDir().mkpath(keyringDir);
 
-    impl.setKeyringDirectory(keyringDir);
+    impl.setKeyringDirectory(keyringDir.toStdString());
 
-    QString did = generateKeyAndGetDid(keysDir, "addkey");
-    LOGOS_ASSERT_FALSE(did.isEmpty());
+    std::string did = generateKeyAndGetDid(keysDir, "addkey");
+    LOGOS_ASSERT_FALSE(did.empty());
 
-    QVariantMap result = impl.addTrustedKey("publisher", did, "Test Publisher", "https://test.com");
-    LOGOS_ASSERT_TRUE(result["success"].toBool());
+    LogosMap result = impl.addTrustedKey("publisher", did, "Test Publisher", "https://test.com");
+    LOGOS_ASSERT_TRUE(result["success"].get<bool>());
 }
 
 LOGOS_TEST(add_trusted_key_invalid_did) {
-    auto t = LogosTestContext("package_manager");
     PackageManagerImpl impl;
-    t.init(&impl);
 
     QTemporaryDir tmpDir;
     LOGOS_ASSERT_TRUE(tmpDir.isValid());
@@ -67,10 +61,10 @@ LOGOS_TEST(add_trusted_key_invalid_did) {
     QString keyringDir = tmpDir.path() + "/keyring";
     QDir().mkpath(keyringDir);
 
-    impl.setKeyringDirectory(keyringDir);
+    impl.setKeyringDirectory(keyringDir.toStdString());
 
-    QVariantMap result = impl.addTrustedKey("bad", "not-a-did", "", "");
-    LOGOS_ASSERT_FALSE(result["success"].toBool());
+    LogosMap result = impl.addTrustedKey("bad", "not-a-did", "", "");
+    LOGOS_ASSERT_FALSE(result["success"].get<bool>());
     LOGOS_ASSERT_TRUE(result.contains("error"));
 }
 
@@ -79,9 +73,7 @@ LOGOS_TEST(add_trusted_key_invalid_did) {
 // =============================================================================
 
 LOGOS_TEST(remove_trusted_key_success) {
-    auto t = LogosTestContext("package_manager");
     PackageManagerImpl impl;
-    t.init(&impl);
 
     QTemporaryDir tmpDir;
     LOGOS_ASSERT_TRUE(tmpDir.isValid());
@@ -91,23 +83,21 @@ LOGOS_TEST(remove_trusted_key_success) {
     QDir().mkpath(keysDir);
     QDir().mkpath(keyringDir);
 
-    impl.setKeyringDirectory(keyringDir);
+    impl.setKeyringDirectory(keyringDir.toStdString());
 
-    QString did = generateKeyAndGetDid(keysDir, "rmkey");
-    LOGOS_ASSERT_FALSE(did.isEmpty());
+    std::string did = generateKeyAndGetDid(keysDir, "rmkey");
+    LOGOS_ASSERT_FALSE(did.empty());
 
     // Add then remove
-    QVariantMap addResult = impl.addTrustedKey("to-remove", did, "", "");
-    LOGOS_ASSERT_TRUE(addResult["success"].toBool());
+    LogosMap addResult = impl.addTrustedKey("to-remove", did, "", "");
+    LOGOS_ASSERT_TRUE(addResult["success"].get<bool>());
 
-    QVariantMap rmResult = impl.removeTrustedKey("to-remove");
-    LOGOS_ASSERT_TRUE(rmResult["success"].toBool());
+    LogosMap rmResult = impl.removeTrustedKey("to-remove");
+    LOGOS_ASSERT_TRUE(rmResult["success"].get<bool>());
 }
 
 LOGOS_TEST(remove_nonexistent_key) {
-    auto t = LogosTestContext("package_manager");
     PackageManagerImpl impl;
-    t.init(&impl);
 
     QTemporaryDir tmpDir;
     LOGOS_ASSERT_TRUE(tmpDir.isValid());
@@ -115,10 +105,10 @@ LOGOS_TEST(remove_nonexistent_key) {
     QString keyringDir = tmpDir.path() + "/keyring";
     QDir().mkpath(keyringDir);
 
-    impl.setKeyringDirectory(keyringDir);
+    impl.setKeyringDirectory(keyringDir.toStdString());
 
-    QVariantMap result = impl.removeTrustedKey("does-not-exist");
-    LOGOS_ASSERT_FALSE(result["success"].toBool());
+    LogosMap result = impl.removeTrustedKey("does-not-exist");
+    LOGOS_ASSERT_FALSE(result["success"].get<bool>());
 }
 
 // =============================================================================
@@ -126,9 +116,7 @@ LOGOS_TEST(remove_nonexistent_key) {
 // =============================================================================
 
 LOGOS_TEST(list_trusted_keys_empty) {
-    auto t = LogosTestContext("package_manager");
     PackageManagerImpl impl;
-    t.init(&impl);
 
     QTemporaryDir tmpDir;
     LOGOS_ASSERT_TRUE(tmpDir.isValid());
@@ -136,16 +124,14 @@ LOGOS_TEST(list_trusted_keys_empty) {
     QString keyringDir = tmpDir.path() + "/keyring";
     QDir().mkpath(keyringDir);
 
-    impl.setKeyringDirectory(keyringDir);
+    impl.setKeyringDirectory(keyringDir.toStdString());
 
-    QVariantList keys = impl.listTrustedKeys();
-    LOGOS_ASSERT_EQ(keys.size(), 0);
+    LogosList keys = impl.listTrustedKeys();
+    LOGOS_ASSERT_EQ(keys.size(), static_cast<size_t>(0));
 }
 
 LOGOS_TEST(list_trusted_keys_after_add) {
-    auto t = LogosTestContext("package_manager");
     PackageManagerImpl impl;
-    t.init(&impl);
 
     QTemporaryDir tmpDir;
     LOGOS_ASSERT_TRUE(tmpDir.isValid());
@@ -155,32 +141,30 @@ LOGOS_TEST(list_trusted_keys_after_add) {
     QDir().mkpath(keysDir);
     QDir().mkpath(keyringDir);
 
-    impl.setKeyringDirectory(keyringDir);
+    impl.setKeyringDirectory(keyringDir.toStdString());
 
-    QString did1 = generateKeyAndGetDid(keysDir, "listkey1");
-    QString did2 = generateKeyAndGetDid(keysDir, "listkey2");
-    LOGOS_ASSERT_FALSE(did1.isEmpty());
-    LOGOS_ASSERT_FALSE(did2.isEmpty());
+    std::string did1 = generateKeyAndGetDid(keysDir, "listkey1");
+    std::string did2 = generateKeyAndGetDid(keysDir, "listkey2");
+    LOGOS_ASSERT_FALSE(did1.empty());
+    LOGOS_ASSERT_FALSE(did2.empty());
 
     impl.addTrustedKey("key-one", did1, "Publisher One", "https://one.com");
     impl.addTrustedKey("key-two", did2, "Publisher Two", "");
 
-    QVariantList keys = impl.listTrustedKeys();
-    LOGOS_ASSERT_EQ(keys.size(), 2);
+    LogosList keys = impl.listTrustedKeys();
+    LOGOS_ASSERT_EQ(keys.size(), static_cast<size_t>(2));
 
     // Collect names
-    QStringList names;
+    std::vector<std::string> names;
     for (const auto& key : keys) {
-        names << key.toMap()["name"].toString();
+        names.push_back(key["name"].get<std::string>());
     }
-    LOGOS_ASSERT_TRUE(names.contains("key-one"));
-    LOGOS_ASSERT_TRUE(names.contains("key-two"));
+    LOGOS_ASSERT_TRUE(std::find(names.begin(), names.end(), "key-one") != names.end());
+    LOGOS_ASSERT_TRUE(std::find(names.begin(), names.end(), "key-two") != names.end());
 }
 
 LOGOS_TEST(list_trusted_keys_contains_metadata) {
-    auto t = LogosTestContext("package_manager");
     PackageManagerImpl impl;
-    t.init(&impl);
 
     QTemporaryDir tmpDir;
     LOGOS_ASSERT_TRUE(tmpDir.isValid());
@@ -190,22 +174,22 @@ LOGOS_TEST(list_trusted_keys_contains_metadata) {
     QDir().mkpath(keysDir);
     QDir().mkpath(keyringDir);
 
-    impl.setKeyringDirectory(keyringDir);
+    impl.setKeyringDirectory(keyringDir.toStdString());
 
-    QString did = generateKeyAndGetDid(keysDir, "metakey");
-    LOGOS_ASSERT_FALSE(did.isEmpty());
+    std::string did = generateKeyAndGetDid(keysDir, "metakey");
+    LOGOS_ASSERT_FALSE(did.empty());
 
     impl.addTrustedKey("meta-publisher", did, "Test Name", "https://test.com");
 
-    QVariantList keys = impl.listTrustedKeys();
-    LOGOS_ASSERT_EQ(keys.size(), 1);
+    LogosList keys = impl.listTrustedKeys();
+    LOGOS_ASSERT_EQ(keys.size(), static_cast<size_t>(1));
 
-    QVariantMap key = keys[0].toMap();
-    LOGOS_ASSERT_EQ(key["name"].toString(), QString("meta-publisher"));
-    LOGOS_ASSERT_EQ(key["did"].toString(), did);
-    LOGOS_ASSERT_EQ(key["displayName"].toString(), QString("Test Name"));
-    LOGOS_ASSERT_EQ(key["url"].toString(), QString("https://test.com"));
-    LOGOS_ASSERT_FALSE(key["addedAt"].toString().isEmpty());
+    LogosMap key = keys[0];
+    LOGOS_ASSERT_EQ(key["name"].get<std::string>(), std::string("meta-publisher"));
+    LOGOS_ASSERT_EQ(key["did"].get<std::string>(), did);
+    LOGOS_ASSERT_EQ(key["displayName"].get<std::string>(), std::string("Test Name"));
+    LOGOS_ASSERT_EQ(key["url"].get<std::string>(), std::string("https://test.com"));
+    LOGOS_ASSERT_FALSE(key["addedAt"].get<std::string>().empty());
 }
 
 // =============================================================================
@@ -213,9 +197,7 @@ LOGOS_TEST(list_trusted_keys_contains_metadata) {
 // =============================================================================
 
 LOGOS_TEST(keyring_add_then_verify_trusted) {
-    auto t = LogosTestContext("package_manager");
     PackageManagerImpl impl;
-    t.init(&impl);
 
     QTemporaryDir tmpDir;
     LOGOS_ASSERT_TRUE(tmpDir.isValid());
@@ -225,7 +207,7 @@ LOGOS_TEST(keyring_add_then_verify_trusted) {
     QDir().mkpath(keysDir);
     QDir().mkpath(keyringDir);
 
-    impl.setKeyringDirectory(keyringDir);
+    impl.setKeyringDirectory(keyringDir.toStdString());
 
     // Create and sign a package
     QString lgxPath = tmpDir.path() + "/rt_test.lgx";
@@ -243,12 +225,12 @@ LOGOS_TEST(keyring_add_then_verify_trusted) {
     lgx_package_t pkg = lgx_load(lgxPath.toStdString().c_str());
     lgx_set_version(pkg, "1.0.0");
 
-    QString variant = [] {
+    std::string variant = [] {
         auto v = PackageManagerLib::platformVariantsToTry();
-        return v.empty() ? "unknown" : QString::fromStdString(v.front());
+        return v.empty() ? std::string("unknown") : v.front();
     }();
 
-    lgx_add_variant(pkg, variant.toStdString().c_str(),
+    lgx_add_variant(pkg, variant.c_str(),
                     contentDir.toStdString().c_str(),
                     libName.toStdString().c_str());
     lgx_save(pkg, lgxPath.toStdString().c_str());
@@ -260,18 +242,17 @@ LOGOS_TEST(keyring_add_then_verify_trusted) {
     lgx_sign(lgxPath.toStdString().c_str(), keyPath.toStdString().c_str(), nullptr, nullptr);
 
     // Verify: not yet trusted
-    QVariantMap r1 = impl.verifyPackage(lgxPath);
-    LOGOS_ASSERT_TRUE(r1["isSigned"].toBool());
-    LOGOS_ASSERT_TRUE(r1["signatureValid"].toBool());
-    LOGOS_ASSERT_TRUE(r1["trustedAs"].toString().isEmpty());
+    LogosMap r1 = impl.verifyPackage(lgxPath.toStdString());
+    LOGOS_ASSERT_TRUE(r1["isSigned"].get<bool>());
+    LOGOS_ASSERT_TRUE(r1["signatureValid"].get<bool>());
+    LOGOS_ASSERT_TRUE(r1["trustedAs"].get<std::string>().empty());
 
     // Trust the key
-    QString did = readDid(keysDir, "rtkey");
+    std::string did = readDid(keysDir, "rtkey");
     impl.addTrustedKey("rt-publisher", did, "", "");
 
     // Verify: now trusted
-    QVariantMap r2 = impl.verifyPackage(lgxPath);
-    LOGOS_ASSERT_TRUE(r2["isSigned"].toBool());
-    LOGOS_ASSERT_EQ(r2["trustedAs"].toString(), QString("rt-publisher"));
+    LogosMap r2 = impl.verifyPackage(lgxPath.toStdString());
+    LOGOS_ASSERT_TRUE(r2["isSigned"].get<bool>());
+    LOGOS_ASSERT_EQ(r2["trustedAs"].get<std::string>(), std::string("rt-publisher"));
 }
-

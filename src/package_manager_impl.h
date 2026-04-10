@@ -1,60 +1,55 @@
 #pragma once
 
-#include "logos_provider_object.h"
-#include "logos_api.h"
-#include <QVariantList>
-#include <QVariantMap>
-#include <QStringList>
+#include <string>
+#include <vector>
+#include <functional>
+#include <logos_json.h>
 
 class PackageManagerLib;
 
-class PackageManagerImpl : public LogosProviderBase
-{
-    LOGOS_PROVIDER(PackageManagerImpl, "package_manager", "1.0.0")
-
-protected:
-    void onInit(LogosAPI* api) override;
-
+class PackageManagerImpl {
 public:
     PackageManagerImpl();
     ~PackageManagerImpl();
 
-    // Install from local LGX file — returns QVariantMap {name, path, error, isCoreModule}
-    LOGOS_METHOD QVariantMap installPlugin(const QString& pluginPath, bool skipIfNotNewerVersion);
+    // Event callback — wired automatically by the generated glue layer.
+    // Call this to emit named events to other modules / the host application.
+    std::function<void(const std::string& eventName, const std::string& data)> emitEvent;
+
+    // Install from local LGX file — returns LogosMap {name, path, error, isCoreModule, ...}
+    LogosMap installPlugin(const std::string& pluginPath, bool skipIfNotNewerVersion);
 
     // Directory configuration — embedded (multiple, read-only)
-    LOGOS_METHOD void setEmbeddedModulesDirectory(const QString& dir);
-    LOGOS_METHOD void addEmbeddedModulesDirectory(const QString& dir);
-    LOGOS_METHOD void setEmbeddedUiPluginsDirectory(const QString& dir);
-    LOGOS_METHOD void addEmbeddedUiPluginsDirectory(const QString& dir);
+    void setEmbeddedModulesDirectory(const std::string& dir);
+    void addEmbeddedModulesDirectory(const std::string& dir);
+    void setEmbeddedUiPluginsDirectory(const std::string& dir);
+    void addEmbeddedUiPluginsDirectory(const std::string& dir);
 
     // Directory configuration — user (single, writable)
-    LOGOS_METHOD void setUserModulesDirectory(const QString& dir);
-    LOGOS_METHOD void setUserUiPluginsDirectory(const QString& dir);
+    void setUserModulesDirectory(const std::string& dir);
+    void setUserUiPluginsDirectory(const std::string& dir);
 
-    // Scanning — each returns JSON array with all manifest fields + installDir + mainFilePath
-    LOGOS_METHOD QVariantList getInstalledPackages();
-    LOGOS_METHOD QVariantList getInstalledModules();
-    LOGOS_METHOD QVariantList getInstalledUiPlugins();
+    // Scanning — each returns LogosList (JSON array with all manifest fields + installDir + mainFilePath)
+    LogosList getInstalledPackages();
+    LogosList getInstalledModules();
+    LogosList getInstalledUiPlugins();
 
     // Platform variants this build accepts (e.g. ["darwin-arm64-dev"] or ["darwin-arm64"])
-    LOGOS_METHOD QStringList getValidVariants();
+    std::vector<std::string> getValidVariants();
 
     // Signature policy configuration
-    LOGOS_METHOD void setSignaturePolicy(const QString& policy);
-    LOGOS_METHOD void setKeyringDirectory(const QString& dir);
+    void setSignaturePolicy(const std::string& policy);
+    void setKeyringDirectory(const std::string& dir);
 
-    // Standalone signature verification — returns {isSigned, signatureValid, packageValid, signerDid, signerName, signerUrl, trustedAs, error}
-    LOGOS_METHOD QVariantMap verifyPackage(const QString& lgxPath);
+    // Standalone signature verification — returns {isSigned, signatureValid, packageValid, signerDid, ...}
+    LogosMap verifyPackage(const std::string& lgxPath);
 
     // Keyring management — add/remove/list trusted signing keys
-    LOGOS_METHOD QVariantMap addTrustedKey(const QString& name, const QString& did,
-                                           const QString& displayName, const QString& url);
-    LOGOS_METHOD QVariantMap removeTrustedKey(const QString& name);
-    LOGOS_METHOD QVariantList listTrustedKeys();
+    LogosMap addTrustedKey(const std::string& name, const std::string& did,
+                           const std::string& displayName, const std::string& url);
+    LogosMap removeTrustedKey(const std::string& name);
+    LogosList listTrustedKeys();
 
 private:
     PackageManagerLib* m_lib;
-
-    void onPluginFileInstalled(const QString& pluginPath, bool isCoreModule);
 };

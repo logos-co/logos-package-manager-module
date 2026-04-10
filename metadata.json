@@ -4,7 +4,7 @@
   "description": "Plugin manager for the Logos system",
   "author": "Logos Core Team",
   "type": "core",
-  "interface": "provider",
+  "interface": "universal",
   "category": "management",
   "main": "package_manager_plugin",
   "dependencies": [],
@@ -12,6 +12,9 @@
   "capabilities": ["plugin_installation"],
 
   "nix": {
+    "packages": {
+      "runtime": ["nlohmann_json"]
+    },
     "external_libraries": [
       { "name": "logos_pm" }
     ],

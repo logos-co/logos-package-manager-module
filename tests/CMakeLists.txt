@@ -16,10 +16,6 @@ logos_test(
         mocks/mock_lgx.cpp
     EXTRA_INCLUDES
         stubs
-    GENERATED_SOURCES
-        ../generated_code/logos_provider_dispatch.cpp
-    GENERATED_DIR
-        ../generated_code
 )
 
 # Integration tests (real PackageManagerLib + lgx)
@@ -62,10 +58,6 @@ if(LIBPM_PATH)
             ../lib
         EXTRA_LINK_LIBS
             ${_pm_integration_libs}
-        GENERATED_SOURCES
-            ../generated_code/logos_provider_dispatch.cpp
-        GENERATED_DIR
-            ../generated_code
     )
 
     set(_rpath_dirs "")
