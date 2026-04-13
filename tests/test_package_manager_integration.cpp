@@ -9,10 +9,10 @@
 
 LOGOS_TEST(integration_getValidVariants_non_empty) {
     PackageManagerImpl impl;
-    QStringList v = impl.getValidVariants();
-    LOGOS_ASSERT_FALSE(v.isEmpty());
-    for (const QString& s : v) {
-        LOGOS_ASSERT_FALSE(s.isEmpty());
+    std::vector<std::string> v = impl.getValidVariants();
+    LOGOS_ASSERT_FALSE(v.empty());
+    for (const auto& s : v) {
+        LOGOS_ASSERT_FALSE(s.empty());
     }
 }
 
@@ -21,12 +21,12 @@ LOGOS_TEST(integration_empty_user_modules_yields_empty_lists) {
     LOGOS_ASSERT_TRUE(dir.isValid());
 
     PackageManagerImpl impl;
-    impl.setUserModulesDirectory(dir.path());
-    impl.setUserUiPluginsDirectory(dir.path());
+    impl.setUserModulesDirectory(dir.path().toStdString());
+    impl.setUserUiPluginsDirectory(dir.path().toStdString());
 
-    LOGOS_ASSERT_TRUE(impl.getInstalledModules().isEmpty());
-    LOGOS_ASSERT_TRUE(impl.getInstalledUiPlugins().isEmpty());
-    LOGOS_ASSERT_TRUE(impl.getInstalledPackages().isEmpty());
+    LOGOS_ASSERT_TRUE(impl.getInstalledModules().empty());
+    LOGOS_ASSERT_TRUE(impl.getInstalledUiPlugins().empty());
+    LOGOS_ASSERT_TRUE(impl.getInstalledPackages().empty());
 }
 
 LOGOS_TEST(integration_embedded_directory_scan_empty) {
@@ -34,8 +34,8 @@ LOGOS_TEST(integration_embedded_directory_scan_empty) {
     LOGOS_ASSERT_TRUE(emb.isValid());
 
     PackageManagerImpl impl;
-    impl.addEmbeddedModulesDirectory(emb.path());
+    impl.addEmbeddedModulesDirectory(emb.path().toStdString());
 
     // No packages under an empty embedded dir
-    LOGOS_ASSERT_TRUE(impl.getInstalledModules().isEmpty());
+    LOGOS_ASSERT_TRUE(impl.getInstalledModules().empty());
 }
