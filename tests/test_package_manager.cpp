@@ -996,6 +996,9 @@ LOGOS_TEST(confirmUpgrade_requires_ack_before_confirm) {
     LOGOS_ASSERT_FALSE(events.has("upgradeUninstallDone"));
 
     // Pending action should remain active until acknowledged/cancelled/reset.
+    // Ack first because cancelUpgrade (like confirmUpgrade) now requires a
+    // prior ack for protocol uniformity — see cancelUpgrade_requires_ack_before_cancel.
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.cancelUpgrade("foo", "v2.0.0")["success"].get<bool>());
 }
 
@@ -1077,6 +1080,53 @@ LOGOS_TEST(cancelUpgrade_tag_mismatch_returns_error) {
     LOGOS_ASSERT_FALSE(events.has("upgradeCancelled"));
 
     // Original pending survives the mismatched cancel.
+    LOGOS_ASSERT_TRUE(impl.cancelUpgrade("foo", "v2.0.0")["success"].get<bool>());
+}
+
+LOGOS_TEST(cancelUninstall_requires_ack_before_cancel) {
+    // Symmetric with confirmUninstall_requires_ack_before_confirm: cancel
+    // also demands a prior ack so the gated protocol's two-phase contract
+    // is uniform across all four confirm/cancel slots. An un-acked pending
+    // state belongs to the ack-reception timer — cancelling it directly
+    // would suppress the "no listener acknowledged" timeout event that
+    // initiators rely on for uniform cancellation handling.
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackage("foo");
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
+
+    LogosMap r = impl.cancelUninstall("foo");
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(r["error"].get<std::string>().find("has not been acknowledged") != std::string::npos);
+    // No uninstallCancelled event fires — the un-acked request is still
+    // owned by the timer, not by a confirming listener.
+    LOGOS_ASSERT_FALSE(events.has("uninstallCancelled"));
+
+    // Pending survives — an ack+cancel still succeeds.
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.cancelUninstall("foo")["success"].get<bool>());
+}
+
+LOGOS_TEST(cancelUpgrade_requires_ack_before_cancel) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackage("foo");
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
+
+    LogosMap r = impl.cancelUpgrade("foo", "v2.0.0");
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(r["error"].get<std::string>().find("has not been acknowledged") != std::string::npos);
+    LOGOS_ASSERT_FALSE(events.has("upgradeCancelled"));
+
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.cancelUpgrade("foo", "v2.0.0")["success"].get<bool>());
 }
 
