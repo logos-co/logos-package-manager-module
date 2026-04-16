@@ -836,6 +836,12 @@ LogosMap PackageManagerImpl::confirmUpgrade(const std::string& packageName,
             response["error"] = "No matching pending upgrade for '" + packageName + "'";
             return response;
         }
+        if (!m_pendingAction.acked) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "Pending upgrade for '" + packageName + "' has not been acknowledged";
+            return response;
+        }
         mode = m_pendingAction.mode;
         m_pendingAction = {};
         stopAckTimerLocked();

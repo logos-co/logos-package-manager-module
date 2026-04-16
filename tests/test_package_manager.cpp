@@ -980,6 +980,25 @@ LOGOS_TEST(confirmUpgrade_no_pending_returns_error) {
     LOGOS_ASSERT_TRUE(r["error"].get<std::string>().find("No matching pending upgrade") != std::string::npos);
 }
 
+LOGOS_TEST(confirmUpgrade_requires_ack_before_confirm) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackage("foo", "core");
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
+
+    LogosMap r = impl.confirmUpgrade("foo", "v2.0.0");
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(r["error"].get<std::string>().find("has not been acknowledged") != std::string::npos);
+    LOGOS_ASSERT_FALSE(events.has("upgradeUninstallDone"));
+
+    // Pending action should remain active until acknowledged/cancelled/reset.
+    LOGOS_ASSERT_TRUE(impl.cancelUpgrade("foo", "v2.0.0")["success"].get<bool>());
+}
+
 // ---------------------------------------------------------------------------
 // cancelUninstall / cancelUpgrade: happy / missing / mismatch
 // ---------------------------------------------------------------------------
