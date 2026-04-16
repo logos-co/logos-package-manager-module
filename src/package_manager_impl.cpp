@@ -790,6 +790,12 @@ LogosMap PackageManagerImpl::confirmUninstall(const std::string& packageName)
             response["error"] = "No matching pending uninstall for '" + packageName + "'";
             return response;
         }
+        if (!m_pendingAction.acked) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "Pending uninstall for '" + packageName + "' has not been acknowledged";
+            return response;
+        }
         m_pendingAction = {};
         stopAckTimerLocked();
     }
