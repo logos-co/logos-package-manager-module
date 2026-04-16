@@ -121,7 +121,12 @@ public:
     //
     //   3b. Once acked, confirmUninstall / confirmUpgrade performs the work;
     //       cancelUninstall / cancelUpgrade aborts and emits the cancellation
-    //       event with reason "user cancelled".
+    //       event with reason "user cancelled". Confirm and cancel both
+    //       require a prior ack — an un-acked pending state is owned by the
+    //       ack-reception timer, and bypassing it would short-circuit the
+    //       "no listener acknowledged" timeout path that initiators rely on.
+    //       Calling confirm/cancel before ack returns { success: false,
+    //       error: "Pending <op> for '<name>' has not been acknowledged" }.
     //
     // Only one gated flow can be pending globally (across packages and ops).
     // A second requestXxx while one is pending returns { success: false, error: ... }.

@@ -816,6 +816,18 @@ LogosMap PackageManagerImpl::cancelUninstall(const std::string& packageName)
             response["error"] = "No matching pending uninstall for '" + packageName + "'";
             return response;
         }
+        // Symmetric with confirmUninstall: the gated protocol requires the
+        // owning listener to ack before driving the decision either way.
+        // An un-acked pending state is owned by the ack-reception timer;
+        // letting cancel short-circuit it would bypass the protocol and
+        // suppress the "no listener acknowledged" timeout event that
+        // initiators otherwise rely on.
+        if (!m_pendingAction.acked) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "Pending uninstall for '" + packageName + "' has not been acknowledged";
+            return response;
+        }
         pa = m_pendingAction;
         m_pendingAction = {};
         stopAckTimerLocked();
@@ -887,6 +899,13 @@ LogosMap PackageManagerImpl::cancelUpgrade(const std::string& packageName,
             LogosMap response;
             response["success"] = false;
             response["error"] = "No matching pending upgrade for '" + packageName + "'";
+            return response;
+        }
+        // See cancelUninstall for why cancel also requires prior ack.
+        if (!m_pendingAction.acked) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "Pending upgrade for '" + packageName + "' has not been acknowledged";
             return response;
         }
         pa = m_pendingAction;
