@@ -28,11 +28,13 @@ All methods are accessible via LogosAPI from other modules and UI plugins.
 | `setUserModulesDirectory(dir)` | Set directory for user-installed core modules |
 | `setUserUiPluginsDirectory(dir)` | Set directory for user-installed UI plugins |
 
-### Installation
+### Installation & Inspection
 
 | Method | Return | Description |
 |--------|--------|-------------|
 | `installPlugin(path, skipIfNotNewer)` | `QVariantMap` | Install a local `.lgx` file. Returns `{name, path, isCoreModule, signatureStatus, error}`. When `signatureStatus` is `"signed"` or `"invalid"`, also includes `signerDid`, `signerName`, `signerUrl`, `trustedAs`. When `signatureStatus` is `"error"`, includes `signatureError`. |
+| `inspectPackage(lgxPath)` | `QVariantMap` | Inspect an LGX file **without installing**. Returns metadata + install status: `{name, version, type, description, category, rootHash, signatureStatus, signerDid?, signerName?, isAlreadyInstalled, installedVersion?, installedHash?, installedDependents?, variants}`. `rootHash` is the Merkle tree root from `manifest.hashes.root` — the same identifier the online catalog exposes. When `isAlreadyInstalled` is true, `installedHash` is the corresponding value from the on-disk manifest. Used by callers (e.g. Basecamp) to show a confirmation dialog before committing. |
+| `uninstallPackage(packageName)` | `QVariantMap` | Remove a user-installed package immediately (ungated). Refuses embedded packages. Returns `{success, error?, removedFiles?}`. On success emits `corePluginUninstalled` or `uiPluginUninstalled`. **Headless callers** (lgpm, scripts) should use this. GUI callers should prefer `requestUninstall` below. |
 
 ### Scanning
 
@@ -43,7 +45,43 @@ All methods are accessible via LogosAPI from other modules and UI plugins.
 | `getInstalledUiPlugins()` | `QVariantList` | Installed UI plugins only |
 | `getValidVariants()` | `QStringList` | Platform variants this build accepts (e.g. `["darwin-arm64-dev"]`) |
 
-Each item in the scan results contains all `manifest.json` fields plus `installDir` and `mainFilePath`.
+Each item in the scan results contains all `manifest.json` fields plus `installDir`, `mainFilePath`, and `installType` (`"embedded"` or `"user"`).
+
+### Dependency Resolution
+
+| Method | Return | Description |
+|--------|--------|-------------|
+| `resolveDependencies(packageName, recursive)` | `QVariantMap` | Forward dependency tree rooted at `packageName`. Shape: `{name, status, version, installType, children: [...]}`. `recursive=false` walks only depth-1 (children have empty `children`); `recursive=true` walks the full tree, stopping at NotInstalled/Cycle nodes. Unknown root → `{}`. |
+| `resolveDependents(packageName, recursive)` | `QVariantMap` | Reverse dependency tree rooted at `packageName`. Shape: `{name, version, type, installType, installDir, children: [...]}`. Same depth semantics as `resolveDependencies`. Unknown root → `{}`. |
+| `resolveFlatDependencies(packageName, recursive)` | `QVariantList` | Flat projection of the forward walk. Each entry: `{name, status, version, installType}` (no `children`). `recursive=false` → direct children only; `recursive=true` → every descendant, BFS-ordered, deduped by name. |
+| `resolveFlatDependents(packageName, recursive)` | `QVariantList` | Flat projection of the reverse walk. Each entry: `{name, version, type, installType, installDir}`. Same `recursive` semantics as `resolveFlatDependencies`. |
+
+### Gated Uninstall / Upgrade Flow
+
+For **GUI callers** that need to show a confirmation dialog before destructive operations. The protocol ensures destructive work never runs without a live listener driving the dialog.
+
+**Protocol:**
+
+1. Caller invokes `requestUninstall(name)` or `requestUpgrade(name, releaseTag, mode)`. Returns `{success, error?}` synchronously. On success, sets pending state, emits `beforeUninstall` / `beforeUpgrade`, and starts a **3-second ack timer**.
+
+2. A listener receiving the event **must immediately** call `ackPendingAction(name)` to cancel the ack timer. This says "I'm driving the dialog — wait indefinitely for the user decision."
+
+3. If the ack timer fires without an ack (no listener present, or event loop stalled >3s), the module clears pending state and emits `uninstallCancelled` / `upgradeCancelled`. No files are removed.
+
+4. Once acked, the listener shows a confirmation dialog. On user confirm: `confirmUninstall(name)` / `confirmUpgrade(name, releaseTag)`. On cancel: `cancelUninstall(name)` / `cancelUpgrade(name, releaseTag)`.
+
+Only **one** gated flow can be pending globally (across all packages and both operations). A second `requestXxx` while one is pending returns `{success: false, error: "Another <op> is in progress for '<name>'"}`.
+
+| Method | Return | Description |
+|--------|--------|-------------|
+| `requestUninstall(name)` | `QVariantMap` | Start gated uninstall. Emits `beforeUninstall`, starts ack timer. |
+| `requestUpgrade(name, releaseTag, mode)` | `QVariantMap` | Start gated upgrade. `mode`: 0=upgrade, 1=downgrade, 2=sidegrade. Emits `beforeUpgrade`, starts ack timer. |
+| `ackPendingAction(name)` | `QVariantMap` | Acknowledge receipt of a `before*` event. Cancels the ack timer. Idempotent. |
+| `confirmUninstall(name)` | `QVariantMap` | Proceed with uninstall. Removes files, emits `corePluginUninstalled` / `uiPluginUninstalled`. |
+| `cancelUninstall(name)` | `QVariantMap` | Abort uninstall. Emits `uninstallCancelled(name, "user cancelled")`. |
+| `confirmUpgrade(name, releaseTag)` | `QVariantMap` | Proceed with upgrade. Uninstalls old version, emits `upgradeUninstallDone` for the caller to drive the download+install of the new version. |
+| `cancelUpgrade(name, releaseTag)` | `QVariantMap` | Abort upgrade. Emits `upgradeCancelled(name, releaseTag, "user cancelled")`. |
+| `resetPendingAction()` | `QVariantMap` | Clear any pending state. Called by Basecamp at startup to recover from a prior crash mid-dialog. |
 
 ### Signature Policy
 
@@ -63,10 +101,24 @@ Each item in the scan results contains all `manifest.json` fields plus `installD
 
 ### Events
 
+**Installation events:**
+
 | Event | Data | Description |
 |-------|------|-------------|
 | `corePluginFileInstalled` | `[path]` | Emitted after a core module `.lgx` is installed |
 | `uiPluginFileInstalled` | `[path]` | Emitted after a UI plugin `.lgx` is installed |
+| `corePluginUninstalled` | `[name]` | Emitted after a core module is uninstalled |
+| `uiPluginUninstalled` | `[name]` | Emitted after a UI plugin is uninstalled |
+
+**Gated flow events** (see "Gated Uninstall / Upgrade Flow" above):
+
+| Event | Data | Description |
+|-------|------|-------------|
+| `beforeUninstall` | `{name, installedDependents}` | A gated uninstall was requested. Listener must ack within 3s. |
+| `beforeUpgrade` | `{name, releaseTag, mode, installedDependents}` | A gated upgrade was requested. Listener must ack within 3s. |
+| `uninstallCancelled` | `{name, reason}` | Uninstall was cancelled — either by ack timeout or user cancel. |
+| `upgradeCancelled` | `{name, releaseTag, reason}` | Upgrade was cancelled — either by ack timeout or user cancel. |
+| `upgradeUninstallDone` | `{name, releaseTag, mode}` | Old version uninstalled during upgrade; caller should now download+install the new version. |
 
 ### Usage from another module
 
@@ -101,12 +153,36 @@ logos.package_manager.removeTrustedKey("logos-official");
 QVariantMap sigInfo = logos.package_manager.verifyPackage("/path/to/waku_module.lgx");
 // sigInfo: {isSigned, signatureValid, packageValid, signerDid, signerName, signerUrl, trustedAs, error}
 
-// Install a downloaded .lgx file
+// Inspect an LGX before installing (shows metadata in a confirmation dialog)
+QVariantMap info = logos.package_manager.inspectPackage("/path/to/waku_module.lgx");
+// info: {name, version, type, signatureStatus, isAlreadyInstalled, installedVersion?, ...}
+
+// Install a downloaded .lgx file (ungated — for headless/scripted use)
 QVariantMap result = logos.package_manager.installPlugin("/path/to/waku_module.lgx", false);
 if (result.contains("error")) {
     qWarning() << "Install failed:" << result["error"].toString();
 }
 // result also includes: signatureStatus ("signed"/"unsigned"/"invalid"), signerDid, signerName, signerUrl, trustedAs
+
+// Flat deduped list of every reverse dependent (BFS over the reverse tree).
+QVariantList dependents = logos.package_manager.resolveFlatDependents("my_module", true);
+// Or fetch the tree shape directly when you want parent/child structure.
+QVariantMap dependentsTree = logos.package_manager.resolveDependents("my_module", true);
+
+// GUI-mode gated uninstall (requires a listener to drive the confirmation dialog)
+logos.package_manager.requestUninstallAsync("my_module", [](QVariantMap r) {
+    if (!r.value("success").toBool()) qWarning() << r.value("error").toString();
+});
+
+// Listen for gated flow events
+logos.package_manager.on("beforeUninstall", [&logos](const QVariantList& data) {
+    QString name = data[0].toMap().value("name").toString();
+    // Ack immediately to cancel the 3s timer
+    logos.package_manager.ackPendingActionAsync(name, [](QVariantMap) {});
+    // Show dialog... then confirm or cancel:
+    // logos.package_manager.confirmUninstallAsync(name, ...);
+    // logos.package_manager.cancelUninstallAsync(name, ...);
+});
 
 // Listen for installation events
 logos.package_manager.on("corePluginFileInstalled", [](const QVariantList& data) {
