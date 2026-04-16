@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -12,6 +14,17 @@ enum class SignaturePolicy {
     REQUIRE
 };
 
+enum class InstallType {
+    Embedded,
+    User,
+};
+
+enum class DependencyStatus {
+    Installed,
+    NotInstalled,
+    Cycle,
+};
+
 struct SignatureVerificationResult {
     bool is_signed = false;
     bool signature_valid = false;
@@ -22,6 +35,65 @@ struct SignatureVerificationResult {
     std::string trusted_as;
     std::string error;
 };
+
+struct UninstallResult {
+    bool success = false;
+    std::string errorMsg;
+    std::vector<std::string> removedFiles;
+};
+
+// Mirrors the real lib's Hashes struct. Only `root` is read today but keeping
+// the nested shape matches manifest.json and leaves room for additions.
+struct Hashes {
+    std::string root;
+};
+
+// Mirrors InstalledPackage in package_manager_lib.h.
+struct InstalledPackage {
+    std::string name;
+    std::string version;
+    std::string description;
+    std::string type;
+    std::string category;
+    std::string author;
+    std::string license;
+    std::string icon;
+    std::string view;
+    std::vector<std::string> dependencies;
+    Hashes hashes;
+    InstallType installType = InstallType::User;
+    std::string installDir;
+    std::string mainFilePath;
+};
+
+// Mirrors DependencyTreeNode in package_manager_lib.h.
+struct DependencyTreeNode {
+    std::string name;
+    DependencyStatus status = DependencyStatus::NotInstalled;
+    std::string version;
+    InstallType installType = InstallType::User;
+    std::vector<DependencyTreeNode> children;
+
+    // Matches the real lib — descendants-only BFS, name-deduped, children
+    // cleared on returned copies. Implementation lives in the mock .cpp so
+    // the stub header stays declaration-only.
+    std::vector<DependencyTreeNode> flatten() const;
+};
+
+// Mirrors DependentTreeNode in package_manager_lib.h.
+struct DependentTreeNode {
+    std::string name;
+    std::string version;
+    std::string type;
+    InstallType installType = InstallType::User;
+    std::string installDir;
+    std::vector<DependentTreeNode> children;
+
+    std::vector<DependentTreeNode> flatten() const;
+};
+
+const char* installTypeToString(InstallType t);
+const char* dependencyStatusToString(DependencyStatus s);
 
 class PackageManagerLib {
 public:
@@ -40,9 +112,9 @@ public:
                                   std::string* installedPluginPath = nullptr,
                                   bool* isCoreModule = nullptr);
 
-    std::string getInstalledPackages();
-    std::string getInstalledModules();
-    std::string getInstalledUiPlugins();
+    std::vector<InstalledPackage> getInstalledPackages();
+    std::vector<InstalledPackage> getInstalledModules();
+    std::vector<InstalledPackage> getInstalledUiPlugins();
 
     static std::vector<std::string> platformVariantsToTry();
 
@@ -51,4 +123,9 @@ public:
     std::string keyringDirectory();
 
     SignatureVerificationResult verifyPackageSignature(const std::string& lgxPath);
+
+    UninstallResult uninstallPackage(const std::string& packageName);
+
+    std::optional<DependencyTreeNode> resolveDependencies(const std::string& packageName);
+    std::optional<DependentTreeNode>  resolveDependents(const std::string& packageName);
 };

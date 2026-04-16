@@ -30,6 +30,11 @@ typedef struct {
     size_t count;
 } lgx_keyring_list_t;
 
+/* Opaque package handle — used by inspectPackage(). Real layout lives in
+ * ../lib; unit tests never invoke these functions (they're only referenced
+ * from code paths that aren't exercised here), so a forward decl is enough. */
+typedef struct lgx_package_opaque* lgx_package_t;
+
 lgx_result_t lgx_keyring_add(const char* keyring_dir,
                              const char* name,
                              const char* did,
@@ -41,6 +46,19 @@ lgx_result_t lgx_keyring_remove(const char* keyring_dir, const char* name);
 lgx_keyring_list_t lgx_keyring_list(const char* keyring_dir);
 
 void lgx_free_keyring_list(lgx_keyring_list_t list);
+
+/* Package loading / inspection — only declarations needed for unit-test
+ * compilation; the real implementations are provided by the lgx library
+ * at link time (integration tests) or stubbed out when unexercised. */
+lgx_package_t lgx_load(const char* path);
+void          lgx_free_package(lgx_package_t pkg);
+const char*   lgx_get_last_error(void);
+const char*   lgx_get_name(lgx_package_t pkg);
+const char*   lgx_get_version(lgx_package_t pkg);
+const char*   lgx_get_description(lgx_package_t pkg);
+const char*   lgx_get_manifest_json(lgx_package_t pkg);
+const char**  lgx_get_variants(lgx_package_t pkg);
+void          lgx_free_string_array(const char** array);
 
 #ifdef __cplusplus
 }
