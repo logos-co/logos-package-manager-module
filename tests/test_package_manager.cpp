@@ -1277,3 +1277,467 @@ LOGOS_TEST(resetPendingAction_allows_new_request) {
 
     impl.resetPendingAction();
 }
+
+// ---------------------------------------------------------------------------
+// requestMultiUninstall / confirmMultiUninstall / cancelMultiUninstall
+// ---------------------------------------------------------------------------
+//
+// Multi-package gated uninstall: same protocol as the single-package version
+// (one pending slot, one ack, one confirm/cancel) but operates on a batch.
+// Tests below mirror the single-uninstall structure (validation → happy →
+// confirm → cancel → cross-op) plus the batch-specific bits: dependents
+// dedup + batch-member exclusion, the multiUninstallCancelled payload shape.
+
+namespace {
+// Prime N user-installed packages — installedDependentsNames lookups in
+// requestMultiUninstall need each one visible to isEmbedded.
+static void primeInstalledUserPackages(const std::vector<std::string>& names,
+                                       const std::string& type = "core") {
+    std::vector<InstalledPackage> pkgs;
+    pkgs.reserve(names.size());
+    for (const auto& n : names) {
+        InstalledPackage p;
+        p.name = n;
+        p.type = type;
+        p.installType = InstallType::User;
+        pkgs.push_back(p);
+    }
+    setMockInstalledPackages(pkgs);
+}
+} // namespace
+
+LOGOS_TEST(requestMultiUninstall_rejects_empty_list) {
+    auto t = LogosTestContext("package_manager");
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LogosMap r = impl.requestMultiUninstall({});
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
+                    std::string("Package list cannot be empty"));
+    LOGOS_ASSERT_FALSE(events.has("beforeMultiUninstall"));
+}
+
+LOGOS_TEST(requestMultiUninstall_rejects_empty_name_in_list) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LogosMap r = impl.requestMultiUninstall({"foo", ""});
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
+                    std::string("Package names cannot be empty"));
+    LOGOS_ASSERT_FALSE(events.has("beforeMultiUninstall"));
+}
+
+LOGOS_TEST(requestMultiUninstall_rejects_when_any_embedded) {
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage user;
+    user.name = "foo";
+    user.type = "core";
+    user.installType = InstallType::User;
+    InstalledPackage embedded;
+    embedded.name = "core_embed";
+    embedded.type = "core";
+    embedded.installType = InstallType::Embedded;
+    setMockInstalledPackages({user, embedded});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LogosMap r = impl.requestMultiUninstall({"foo", "core_embed"});
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    // Error message lists the offending embedded package(s).
+    std::string err = r["error"].get<std::string>();
+    LOGOS_ASSERT_TRUE(err.find("embedded") != std::string::npos);
+    LOGOS_ASSERT_TRUE(err.find("core_embed") != std::string::npos);
+    LOGOS_ASSERT_FALSE(events.has("beforeMultiUninstall"));
+}
+
+LOGOS_TEST(requestMultiUninstall_rejects_when_already_pending) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LogosMap first = impl.requestMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_TRUE(first["success"].get<bool>());
+
+    // A subsequent multi-uninstall while one is pending must be rejected,
+    // and the error message must mention the in-progress op.
+    LogosMap second = impl.requestMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_FALSE(second["success"].get<bool>());
+    std::string err = second["error"].get<std::string>();
+    LOGOS_ASSERT_TRUE(err.find("multi-uninstall") != std::string::npos);
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(requestMultiUninstall_emits_beforeMultiUninstall_with_names_and_dependents) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    // The same dependent tree is returned for every resolveDependents call
+    // (mock semantics). Root="foo" with child "parent_pkg" — verifies the
+    // payload carries `installedDependents`.
+    DependentTreeNode root;
+    root.name = "foo";
+    DependentTreeNode parent;
+    parent.name = "parent_pkg";
+    root.children = {parent};
+    setMockDependentTree(root);
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LogosMap r = impl.requestMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_TRUE(r["success"].get<bool>());
+    LOGOS_ASSERT_FALSE(r.contains("error"));
+
+    auto matches = events.all("beforeMultiUninstall");
+    LOGOS_ASSERT_EQ(matches.size(), static_cast<size_t>(1));
+    LogosMap payload = LogosMap::parse(matches[0].data);
+
+    // Payload carries the full `names` array (not a single `name` string).
+    LOGOS_ASSERT_TRUE(payload.contains("names"));
+    LOGOS_ASSERT_FALSE(payload.contains("name"));
+    LOGOS_ASSERT_EQ(payload["names"].size(), static_cast<size_t>(2));
+    LOGOS_ASSERT_EQ(payload["names"][0].get<std::string>(), std::string("foo"));
+    LOGOS_ASSERT_EQ(payload["names"][1].get<std::string>(), std::string("bar"));
+
+    // installedDependents has at least parent_pkg (mock returns same tree
+    // for both packages, dedup keeps it just once).
+    LOGOS_ASSERT_TRUE(payload["installedDependents"].is_array());
+    bool hasParent = false;
+    for (size_t i = 0; i < payload["installedDependents"].size(); ++i) {
+        if (payload["installedDependents"][i].get<std::string>() == "parent_pkg") {
+            hasParent = true;
+            break;
+        }
+    }
+    LOGOS_ASSERT_TRUE(hasParent);
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(requestMultiUninstall_dependents_excludes_batch_members) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    // Tree where one of the dependents IS a member of the batch (`bar`).
+    // The non-trivial logic under test: bar should NOT appear in
+    // installedDependents because it's already being uninstalled.
+    DependentTreeNode root;
+    root.name = "foo";
+    DependentTreeNode barNode;
+    barNode.name = "bar";
+    DependentTreeNode parent;
+    parent.name = "parent_pkg";
+    root.children = {barNode, parent};
+    setMockDependentTree(root);
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+
+    auto matches = events.all("beforeMultiUninstall");
+    LogosMap payload = LogosMap::parse(matches[0].data);
+    // Walk installedDependents: bar must be filtered out, parent_pkg must remain.
+    bool sawBar = false;
+    bool sawParent = false;
+    for (size_t i = 0; i < payload["installedDependents"].size(); ++i) {
+        const std::string n = payload["installedDependents"][i].get<std::string>();
+        if (n == "bar")        sawBar = true;
+        if (n == "parent_pkg") sawParent = true;
+    }
+    LOGOS_ASSERT_FALSE(sawBar);
+    LOGOS_ASSERT_TRUE(sawParent);
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(ackPendingAction_works_using_first_batch_name) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+
+    // Per the impl: m_pendingAction.name is set to names[0], so single-name
+    // ackPendingAction continues to work unchanged for the multi flow.
+    LogosMap ack = impl.ackPendingAction("foo");
+    LOGOS_ASSERT_TRUE(ack["success"].get<bool>());
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(confirmMultiUninstall_all_succeed_emits_per_package_events) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"}, "core");
+    t.mockCFunction("uninstallPackage_success").returns(true);
+    t.mockCFunction("uninstallPackage_removed").returns("/m/x.dylib");
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
+
+    LogosMap r = impl.confirmMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_TRUE(r["success"].get<bool>());
+    // Per-package results array carries one entry per submitted name.
+    LOGOS_ASSERT_EQ(r["results"].size(), static_cast<size_t>(2));
+    LOGOS_ASSERT_EQ(r["results"][0]["name"].get<std::string>(), std::string("foo"));
+    LOGOS_ASSERT_TRUE(r["results"][0]["success"].get<bool>());
+    LOGOS_ASSERT_EQ(r["results"][1]["name"].get<std::string>(), std::string("bar"));
+    LOGOS_ASSERT_TRUE(r["results"][1]["success"].get<bool>());
+
+    // Per-package corePluginUninstalled events fired (one per uninstall, two total).
+    LOGOS_ASSERT_EQ(events.all("corePluginUninstalled").size(), static_cast<size_t>(2));
+
+    // A second confirm fails — pending was cleared.
+    LogosMap again = impl.confirmMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_FALSE(again["success"].get<bool>());
+}
+
+LOGOS_TEST(confirmMultiUninstall_all_fail_returns_top_level_success_false) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"}, "core");
+    t.mockCFunction("uninstallPackage_success").returns(false);
+    t.mockCFunction("uninstallPackage_error").returns("delete failed");
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
+
+    LogosMap r = impl.confirmMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_EQ(r["results"].size(), static_cast<size_t>(2));
+    // Both results carry success=false and the per-package error.
+    for (size_t i = 0; i < r["results"].size(); ++i) {
+        LOGOS_ASSERT_FALSE(r["results"][i]["success"].get<bool>());
+        LOGOS_ASSERT_EQ(r["results"][i]["error"].get<std::string>(),
+                        std::string("delete failed"));
+    }
+    // No per-package corePluginUninstalled events when uninstalls fail.
+    LOGOS_ASSERT_FALSE(events.has("corePluginUninstalled"));
+}
+
+LOGOS_TEST(confirmMultiUninstall_no_pending_returns_error) {
+    auto t = LogosTestContext("package_manager");
+    PackageManagerImpl impl;
+
+    LogosMap r = impl.confirmMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(r["error"].get<std::string>()
+                          .find("No matching pending multi-uninstall") != std::string::npos);
+}
+
+LOGOS_TEST(confirmMultiUninstall_name_mismatch_returns_error) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"}, "core");
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
+
+    // Confirm with a different list — same first name but a different second name.
+    LogosMap r = impl.confirmMultiUninstall({"foo", "baz"});
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+
+    // Pending state must still be valid — a correct cancel should succeed.
+    LOGOS_ASSERT_TRUE(impl.cancelMultiUninstall({"foo", "bar"})["success"].get<bool>());
+}
+
+LOGOS_TEST(confirmMultiUninstall_without_ack_returns_error) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+    // Skip ackPendingAction — confirm should fail.
+    LogosMap r = impl.confirmMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(r["error"].get<std::string>()
+                          .find("not been acknowledged") != std::string::npos);
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(cancelMultiUninstall_emits_multiUninstallCancelled_with_names_array) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
+
+    LogosMap r = impl.cancelMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_TRUE(r["success"].get<bool>());
+
+    auto matches = events.all("multiUninstallCancelled");
+    LOGOS_ASSERT_EQ(matches.size(), static_cast<size_t>(1));
+    LogosMap payload = LogosMap::parse(matches[0].data);
+    // Distinct from uninstallCancelled / upgradeCancelled: payload uses
+    // `names` (array) rather than `name` (string).
+    LOGOS_ASSERT_TRUE(payload.contains("names"));
+    LOGOS_ASSERT_FALSE(payload.contains("name"));
+    LOGOS_ASSERT_EQ(payload["names"].size(), static_cast<size_t>(2));
+    LOGOS_ASSERT_EQ(payload["reason"].get<std::string>(), std::string("user cancelled"));
+}
+
+LOGOS_TEST(cancelMultiUninstall_no_pending_returns_error) {
+    auto t = LogosTestContext("package_manager");
+    PackageManagerImpl impl;
+
+    LogosMap r = impl.cancelMultiUninstall({"foo", "bar"});
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(r["error"].get<std::string>()
+                          .find("No matching pending multi-uninstall") != std::string::npos);
+}
+
+LOGOS_TEST(cancelMultiUninstall_name_mismatch_returns_error) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
+
+    LogosMap r = impl.cancelMultiUninstall({"foo", "baz"});
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    // Original pending still valid.
+    LOGOS_ASSERT_TRUE(impl.cancelMultiUninstall({"foo", "bar"})["success"].get<bool>());
+}
+
+LOGOS_TEST(requestMultiUninstall_blocks_subsequent_requestUninstall) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+
+    // A single-package request while a multi is pending must fail.
+    LogosMap r = impl.requestUninstall("foo");
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    std::string err = r["error"].get<std::string>();
+    LOGOS_ASSERT_TRUE(err.find("multi-uninstall") != std::string::npos);
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(requestMultiUninstall_dedupes_duplicate_input_names) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    // Caller passes duplicates; impl must dedupe so doUninstall isn't called
+    // twice for the same name in confirmMultiUninstall.
+    LogosMap r = impl.requestMultiUninstall({"foo", "foo", "bar", "foo"});
+    LOGOS_ASSERT_TRUE(r["success"].get<bool>());
+
+    auto matches = events.all("beforeMultiUninstall");
+    LogosMap payload = LogosMap::parse(matches[0].data);
+    // First-occurrence order preserved: foo (first), bar (third). The
+    // duplicate "foo"s drop out.
+    LOGOS_ASSERT_EQ(payload["names"].size(), static_cast<size_t>(2));
+    LOGOS_ASSERT_EQ(payload["names"][0].get<std::string>(), std::string("foo"));
+    LOGOS_ASSERT_EQ(payload["names"][1].get<std::string>(), std::string("bar"));
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(confirmMultiUninstall_accepts_caller_with_duplicates) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"}, "core");
+    t.mockCFunction("uninstallPackage_success").returns(true);
+    t.mockCFunction("uninstallPackage_removed").returns("/m/x.dylib");
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    // Stored pending state holds the deduped list — confirm with the original
+    // duplicated form must still match (both sides dedupe at the boundary)
+    // and must call doUninstall exactly once per unique name.
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "foo", "bar"})["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
+
+    LogosMap r = impl.confirmMultiUninstall({"foo", "foo", "bar"});
+    LOGOS_ASSERT_TRUE(r["success"].get<bool>());
+    LOGOS_ASSERT_EQ(r["results"].size(), static_cast<size_t>(2));      // not 3
+    LOGOS_ASSERT_EQ(events.all("corePluginUninstalled").size(),
+                    static_cast<size_t>(2));                            // not 3
+}
+
+LOGOS_TEST(ackPendingAction_accepts_any_name_in_multi_uninstall_batch) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar", "baz"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar", "baz"})["success"].get<bool>());
+
+    // Listener acks with the THIRD batch member — must succeed. Coupling the
+    // wire protocol to names[0] specifically would force callers to know an
+    // internal storage detail.
+    LogosMap ack = impl.ackPendingAction("baz");
+    LOGOS_ASSERT_TRUE(ack["success"].get<bool>());
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(ackPendingAction_rejects_name_not_in_multi_uninstall_batch) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackages({"foo", "bar"});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    impl.emitEvent = events.callback();
+
+    LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
+
+    // Names not in the batch must still be rejected — the relaxation is
+    // "any batch member", not "any name at all".
+    LogosMap ack = impl.ackPendingAction("not_in_batch");
+    LOGOS_ASSERT_FALSE(ack["success"].get<bool>());
+
+    impl.resetPendingAction();
+}
