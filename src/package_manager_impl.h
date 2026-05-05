@@ -140,6 +140,10 @@ public:
     LogosMap confirmUpgrade(const std::string& packageName, const std::string& releaseTag);
     LogosMap cancelUpgrade(const std::string& packageName, const std::string& releaseTag);
 
+    LogosMap requestMultiUninstall(const std::vector<std::string>& packageNamesIn);
+    LogosMap confirmMultiUninstall(const std::vector<std::string>& packageNamesIn);
+    LogosMap cancelMultiUninstall(const std::vector<std::string>& packageNamesIn);
+
     // Belt-and-braces: clears any pending state. Called by Basecamp at startup
     // so a crash mid-dialog in a previous session doesn't block new requests.
     LogosMap resetPendingAction();
@@ -152,13 +156,14 @@ public:
     void setAckTimeoutMsForTest(int ms) { m_ackTimeoutMs = ms; }
 
 private:
-    enum class PendingOp { None, Uninstall, Upgrade };
+    enum class PendingOp { None, Uninstall, Upgrade, MultiUninstall };
 
     struct PendingAction {
         PendingOp   op = PendingOp::None;
-        std::string name;
-        std::string releaseTag;   // upgrade only
-        int64_t     mode = 0;     // upgrade only (UpgradeMode enum as int)
+        std::string name;             // Uninstall / Upgrade only; empty for MultiUninstall (which uses `names`).
+        std::vector<std::string> names; // MultiUninstall only — full deduped batch
+        std::string releaseTag;        // upgrade only
+        int64_t     mode = 0;          // upgrade only (UpgradeMode enum as int)
         bool        acked = false;
     };
 
@@ -167,6 +172,7 @@ private:
     // 3 real seconds each.
     int m_ackTimeoutMs = 3000;
     static const char* opName(PendingOp op);
+    std::string pendingDescriptionLocked() const;
 
     // ----------------------------------------------------------------
     // Pure-C++ ack timer.

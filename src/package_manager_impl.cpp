@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <set>
 
 // ---------------------------------------------------------------------------
 // Struct → LogosMap / LogosList conversion helpers
@@ -529,11 +530,28 @@ LogosList PackageManagerImpl::listTrustedKeys()
 const char* PackageManagerImpl::opName(PendingOp op)
 {
     switch (op) {
-        case PendingOp::Uninstall: return "uninstall";
-        case PendingOp::Upgrade:   return "upgrade";
-        case PendingOp::None:      return "none";
+        case PendingOp::Uninstall:      return "uninstall";
+        case PendingOp::Upgrade:        return "upgrade";
+        case PendingOp::MultiUninstall: return "multi-uninstall";
+        case PendingOp::None:           return "none";
     }
     return "none";
+}
+
+// Human-readable description of the pending action for cross-op blocking
+// error messages. Single-name ops include the package name; multi includes
+// the batch size (showing names[0] alone would be misleading for a batch).
+// Caller must hold m_stateMutex.
+std::string PackageManagerImpl::pendingDescriptionLocked() const
+{
+    std::string desc = std::string("Another ") + opName(m_pendingAction.op);
+    if (m_pendingAction.op == PendingOp::MultiUninstall) {
+        desc += " is in progress (batch of "
+              + std::to_string(m_pendingAction.names.size()) + " packages)";
+    } else {
+        desc += " is in progress for '" + m_pendingAction.name + "'";
+    }
+    return desc;
 }
 
 bool PackageManagerImpl::isEmbedded(const std::string& packageName) const
@@ -645,13 +663,19 @@ void PackageManagerImpl::emitCancellation(const PendingAction& pa, const std::st
     if (!emitEvent) return;
 
     LogosMap payload;
-    payload["name"] = pa.name;
     payload["reason"] = reason;
     if (pa.op == PendingOp::Upgrade) {
+        payload["name"] = pa.name;
         payload["releaseTag"] = pa.releaseTag;
         emitEvent("upgradeCancelled", payload.dump());
     } else if (pa.op == PendingOp::Uninstall) {
+        payload["name"] = pa.name;
         emitEvent("uninstallCancelled", payload.dump());
+    } else if (pa.op == PendingOp::MultiUninstall) {
+        LogosList names = LogosList::array();
+        for (const auto& n : pa.names) names.push_back(n);
+        payload["names"] = names;
+        emitEvent("multiUninstallCancelled", payload.dump());
     }
 }
 
@@ -673,8 +697,7 @@ LogosMap PackageManagerImpl::requestUninstall(const std::string& packageName)
 
     if (m_pendingAction.op != PendingOp::None) {
         response["success"] = false;
-        response["error"] = std::string("Another ") + opName(m_pendingAction.op)
-                          + " is in progress for '" + m_pendingAction.name + "'";
+        response["error"] = pendingDescriptionLocked();
         return response;
     }
 
@@ -728,8 +751,7 @@ LogosMap PackageManagerImpl::requestUpgrade(const std::string& packageName,
 
     if (m_pendingAction.op != PendingOp::None) {
         response["success"] = false;
-        response["error"] = std::string("Another ") + opName(m_pendingAction.op)
-                          + " is in progress for '" + m_pendingAction.name + "'";
+        response["error"] = pendingDescriptionLocked();
         return response;
     }
 
@@ -768,7 +790,17 @@ LogosMap PackageManagerImpl::ackPendingAction(const std::string& packageName)
 {
     std::lock_guard<std::mutex> lock(m_stateMutex);
     LogosMap response;
-    if (m_pendingAction.op == PendingOp::None || m_pendingAction.name != packageName) {
+
+    bool match = false;
+    if (m_pendingAction.op == PendingOp::MultiUninstall) {
+        match = std::find(m_pendingAction.names.begin(),
+                          m_pendingAction.names.end(),
+                          packageName) != m_pendingAction.names.end();
+    } else if (m_pendingAction.op != PendingOp::None) {
+        match = (m_pendingAction.name == packageName);
+    }
+
+    if (!match) {
         response["success"] = false;
         response["error"] = "No matching pending action to ack for '" + packageName + "'";
         return response;
@@ -923,6 +955,189 @@ LogosMap PackageManagerImpl::resetPendingAction()
     std::lock_guard<std::mutex> lock(m_stateMutex);
     m_pendingAction = {};
     stopAckTimerLocked();
+    LogosMap response;
+    response["success"] = true;
+    return response;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-package gated uninstall
+// ---------------------------------------------------------------------------
+//
+// Same protocol as requestUninstall — single pending slot, single ack, single
+// confirm/cancel — extended to gate a batch of N packages. The destructive
+// loop in confirmMultiUninstall calls doUninstall(name) per package, which
+// emits per-package corePluginUninstalled / uiPluginUninstalled as today
+
+namespace {
+
+// Dedupe while preserving first-occurrence order. Used at the boundary of
+// every multi-uninstall entry point so duplicate names in the caller's list
+// can never cause a double-uninstall or a confirm/cancel mismatch.
+static std::vector<std::string> dedupeNamesPreserveOrder(
+    const std::vector<std::string>& in)
+{
+    std::vector<std::string> out;
+    out.reserve(in.size());
+    std::set<std::string> seen;
+    for (const auto& n : in) {
+        if (seen.insert(n).second) out.push_back(n);
+    }
+    return out;
+}
+
+} // namespace
+
+LogosMap PackageManagerImpl::requestMultiUninstall(const std::vector<std::string>& packageNamesIn)
+{
+    LogosMap response;
+
+    if (packageNamesIn.empty()) {
+        response["success"] = false;
+        response["error"] = "Package list cannot be empty";
+        return response;
+    }
+
+    for (const auto& n : packageNamesIn) {
+        if (n.empty()) {
+            response["success"] = false;
+            response["error"] = "Package names cannot be empty";
+            return response;
+        }
+    }
+
+    // Dedupe immediately so every downstream check (embedded scan, dependents
+    // union, m_pendingAction.names storage, beforeMultiUninstall payload)
+    // operates on the canonical set.
+    const std::vector<std::string> packageNames =
+        dedupeNamesPreserveOrder(packageNamesIn);
+
+    std::unique_lock<std::mutex> lock(m_stateMutex);
+
+    if (m_pendingAction.op != PendingOp::None) {
+        response["success"] = false;
+        response["error"] = pendingDescriptionLocked();
+        return response;
+    }
+
+    std::vector<std::string> embedded;
+    for (const auto& n : packageNames) {
+        if (isEmbedded(n)) embedded.push_back(n);
+    }
+    if (!embedded.empty()) {
+        std::string msg = "Cannot uninstall embedded modules:";
+        for (const auto& n : embedded) msg += " '" + n + "'";
+        response["success"] = false;
+        response["error"] = msg;
+        return response;
+    }
+
+    m_pendingAction = {};
+    m_pendingAction.op = PendingOp::MultiUninstall;
+    m_pendingAction.names = packageNames;
+    m_pendingAction.acked = false;
+    // m_pendingAction.name intentionally left empty — ack matches against
+    // m_pendingAction.names directly; the cross-op blocking error message
+    // uses pendingDescriptionLocked() which handles the multi case.
+
+    std::set<std::string> batchSet(packageNames.begin(), packageNames.end());
+    std::vector<std::string> dedupedDeps;
+    std::set<std::string> seen;
+    for (const auto& n : packageNames) {
+        for (const auto& d : installedDependentsNames(n)) {
+            if (batchSet.count(d)) continue;
+            if (seen.insert(d).second) dedupedDeps.push_back(d);
+        }
+    }
+
+    LogosMap payload;
+    LogosList namesArr = LogosList::array();
+    for (const auto& n : packageNames) namesArr.push_back(n);
+    payload["names"] = namesArr;
+    LogosList depsArr = LogosList::array();
+    for (const auto& d : dedupedDeps) depsArr.push_back(d);
+    payload["installedDependents"] = depsArr;
+
+    startAckTimerLocked(lock);
+
+    lock.unlock();
+    if (emitEvent) emitEvent("beforeMultiUninstall", payload.dump());
+
+    response["success"] = true;
+    return response;
+}
+
+LogosMap PackageManagerImpl::confirmMultiUninstall(const std::vector<std::string>& packageNamesIn)
+{
+    // Dedupe so callers can pass either the original or deduped form — the
+    // pending state always holds the deduped list (see requestMultiUninstall).
+    const std::vector<std::string> packageNames =
+        dedupeNamesPreserveOrder(packageNamesIn);
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        if (m_pendingAction.op != PendingOp::MultiUninstall || m_pendingAction.names != packageNames) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "No matching pending multi-uninstall";
+            return response;
+        }
+        if (!m_pendingAction.acked) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "Pending multi-uninstall has not been acknowledged";
+            return response;
+        }
+        m_pendingAction = {};
+        stopAckTimerLocked();
+    }
+
+    LogosList results = LogosList::array();
+    bool allOk = true;
+    for (const auto& n : packageNames) {
+        LogosMap one = doUninstall(n);
+        bool ok = one.value("success", false);
+        if (!ok) allOk = false;
+        LogosMap entry;
+        entry["name"] = n;
+        entry["success"] = ok;
+        if (one.contains("error"))        entry["error"] = one["error"];
+        if (one.contains("removedFiles")) entry["removedFiles"] = one["removedFiles"];
+        results.push_back(entry);
+    }
+
+    LogosMap response;
+    response["success"] = allOk;
+    response["results"] = results;
+    return response;
+}
+
+LogosMap PackageManagerImpl::cancelMultiUninstall(const std::vector<std::string>& packageNamesIn)
+{
+    // Dedupe so callers can pass either the original or deduped form — see
+    // confirmMultiUninstall for rationale.
+    const std::vector<std::string> packageNames =
+        dedupeNamesPreserveOrder(packageNamesIn);
+
+    PendingAction pa;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        if (m_pendingAction.op != PendingOp::MultiUninstall || m_pendingAction.names != packageNames) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "No matching pending multi-uninstall";
+            return response;
+        }
+        if (!m_pendingAction.acked) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "Pending multi-uninstall has not been acknowledged";
+            return response;
+        }
+        pa = m_pendingAction;
+        m_pendingAction = {};
+        stopAckTimerLocked();
+    }
+    emitCancellation(pa, "user cancelled");
     LogosMap response;
     response["success"] = true;
     return response;
