@@ -2,26 +2,22 @@
 
 #include <string>
 #include <vector>
-#include <functional>
 #include <mutex>
 #include <condition_variable>
 #include <thread>
 #include <cstdint>
 #include <logos_json.h>
+#include <logos_module_context.h>  // LogosModuleContext base; provides `logos_events`
 
 class PackageManagerLib;
 
-class PackageManagerImpl {
+class PackageManagerImpl : public LogosModuleContext {
 public:
     PackageManagerImpl();
     ~PackageManagerImpl();
 
     PackageManagerImpl(const PackageManagerImpl&) = delete;
     PackageManagerImpl& operator=(const PackageManagerImpl&) = delete;
-
-    // Event callback — wired automatically by the generated glue layer.
-    // Call this to emit named events to other modules / the host application.
-    std::function<void(const std::string& eventName, const std::string& data)> emitEvent;
 
     // Install from local LGX file — returns LogosMap {name, path, error, isCoreModule, ...}
     LogosMap installPlugin(const std::string& pluginPath, bool skipIfNotNewerVersion);
@@ -155,6 +151,26 @@ public:
     // concurrent worker.
     void setAckTimeoutMsForTest(int ms) { m_ackTimeoutMs = ms; }
 
+    // Events this module emits to listeners (other modules / the host).
+    // Declared Qt-`signals:`-style; the codegen supplies the bodies in
+    // `package_manager_events.cpp`. Call them like ordinary methods —
+    // they no-op when no listener is wired (e.g. a headless runtime with
+    // no subscribers). The install/uninstall events carry a single path or
+    // package name; the gated-flow events carry a JSON payload string (see
+    // emit sites).
+logos_events:
+    void corePluginFileInstalled(const std::string& path);
+    void uiPluginFileInstalled(const std::string& path);
+    void corePluginUninstalled(const std::string& packageName);
+    void uiPluginUninstalled(const std::string& packageName);
+    void beforeUninstall(const std::string& payload);
+    void beforeUpgrade(const std::string& payload);
+    void beforeMultiUninstall(const std::string& payload);
+    void uninstallCancelled(const std::string& payload);
+    void upgradeCancelled(const std::string& payload);
+    void multiUninstallCancelled(const std::string& payload);
+    void upgradeUninstallDone(const std::string& payload);
+
 private:
     enum class PendingOp { None, Uninstall, Upgrade, MultiUninstall };
 
@@ -199,10 +215,10 @@ private:
     //   - The destructor sets m_ackShutdown, notifies the CV, and joins the
     //     worker before destroying any other state.
     //
-    // Everything else on this class (m_lib access, file scanning, emitEvent
-    // from user code) runs serially on the module thread via the glue layer's
-    // queued connection, so no additional locking is needed beyond
-    // m_stateMutex guarding the pending-action state.
+    // Everything else on this class (m_lib access, file scanning, typed
+    // event emission from user code) runs serially on the module thread via
+    // the glue layer's queued connection, so no additional locking is needed
+    // beyond m_stateMutex guarding the pending-action state.
     void startAckTimerLocked(std::unique_lock<std::mutex>& lock);
     void stopAckTimerLocked();
     void ackTimerWorker(uint64_t myGeneration);

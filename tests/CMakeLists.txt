@@ -11,6 +11,7 @@ logos_test(
     TEST_SOURCES
         main.cpp
         test_package_manager.cpp
+        package_manager_events_test.cpp
     MOCK_C_SOURCES
         mocks/mock_package_manager_lib.cpp
         mocks/mock_lgx.cpp
@@ -54,6 +55,7 @@ if(LIBPM_PATH)
             test_scanning.cpp
             test_signature.cpp
             test_keyring.cpp
+            package_manager_events_test.cpp
         EXTRA_INCLUDES
             ../lib
         EXTRA_LINK_LIBS
