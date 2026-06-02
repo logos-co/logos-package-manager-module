@@ -128,8 +128,8 @@ PackageManagerImpl::PackageManagerImpl()
 PackageManagerImpl::~PackageManagerImpl()
 {
     // Signal any running worker thread to exit, then join it before
-    // tearing down state it might still reference (m_pendingAction,
-    // emitEvent). The lock is taken briefly to publish m_ackShutdown and
+    // tearing down state it might still reference (m_pendingAction, the
+    // typed-event callback). The lock is taken briefly to publish m_ackShutdown and
     // bump m_ackGeneration atomically; notify + join happen outside the
     // lock so the worker can re-acquire and exit its wait_for.
     {
@@ -156,11 +156,11 @@ LogosMap PackageManagerImpl::installPlugin(const std::string& pluginPath, bool s
 
     bool success = !result.empty();
 
-    if (success && !installedPluginPath.empty() && emitEvent) {
+    if (success && !installedPluginPath.empty()) {
         if (isCoreModule) {
-            emitEvent("corePluginFileInstalled", installedPluginPath);
+            corePluginFileInstalled(installedPluginPath);
         } else {
-            emitEvent("uiPluginFileInstalled", installedPluginPath);
+            uiPluginFileInstalled(installedPluginPath);
         }
     }
 
@@ -343,12 +343,10 @@ LogosMap PackageManagerImpl::doUninstall(const std::string& packageName)
         for (const auto& f : r.removedFiles) removed.push_back(f);
         response["removedFiles"] = removed;
 
-        if (emitEvent) {
-            const std::string eventName =
-                (moduleType == "core")
-                    ? "corePluginUninstalled"
-                    : "uiPluginUninstalled";
-            emitEvent(eventName, packageName);
+        if (moduleType == "core") {
+            corePluginUninstalled(packageName);
+        } else {
+            uiPluginUninstalled(packageName);
         }
     }
     return response;
@@ -650,7 +648,7 @@ void PackageManagerImpl::ackTimerWorker(uint64_t myGeneration)
     const std::string reason = "no listener acknowledged within "
                              + std::to_string(m_ackTimeoutMs) + "ms";
 
-    // Release the lock before emitting — emitEvent marshals through a
+    // Release the lock before emitting — event emission marshals through a
     // Qt signal; a listener synchronously calling back into this impl
     // (e.g. a headless runtime that calls uninstallPackage on cancel
     // notification) would otherwise re-enter the mutex and deadlock.
@@ -660,22 +658,20 @@ void PackageManagerImpl::ackTimerWorker(uint64_t myGeneration)
 
 void PackageManagerImpl::emitCancellation(const PendingAction& pa, const std::string& reason)
 {
-    if (!emitEvent) return;
-
     LogosMap payload;
     payload["reason"] = reason;
     if (pa.op == PendingOp::Upgrade) {
         payload["name"] = pa.name;
         payload["releaseTag"] = pa.releaseTag;
-        emitEvent("upgradeCancelled", payload.dump());
+        upgradeCancelled(payload.dump());
     } else if (pa.op == PendingOp::Uninstall) {
         payload["name"] = pa.name;
-        emitEvent("uninstallCancelled", payload.dump());
+        uninstallCancelled(payload.dump());
     } else if (pa.op == PendingOp::MultiUninstall) {
         LogosList names = LogosList::array();
         for (const auto& n : pa.names) names.push_back(n);
         payload["names"] = names;
-        emitEvent("multiUninstallCancelled", payload.dump());
+        multiUninstallCancelled(payload.dump());
     }
 }
 
@@ -713,8 +709,8 @@ LogosMap PackageManagerImpl::requestUninstall(const std::string& packageName)
     m_pendingAction.acked = false;
 
     // Build the event payload while we still hold the lock (so m_lib reads
-    // don't race against a concurrent slot). emitEvent itself is deferred
-    // until after the unlock — see the reentrancy note in ackTimerWorker.
+    // don't race against a concurrent slot). The event emission itself is
+    // deferred until after the unlock — see the reentrancy note in ackTimerWorker.
     LogosMap payload;
     payload["name"] = packageName;
     LogosList deps = LogosList::array();
@@ -727,7 +723,7 @@ LogosMap PackageManagerImpl::requestUninstall(const std::string& packageName)
     startAckTimerLocked(lock);
 
     lock.unlock();
-    if (emitEvent) emitEvent("beforeUninstall", payload.dump());
+    beforeUninstall(payload.dump());
 
     response["success"] = true;
     return response;
@@ -780,7 +776,7 @@ LogosMap PackageManagerImpl::requestUpgrade(const std::string& packageName,
     startAckTimerLocked(lock);
 
     lock.unlock();
-    if (emitEvent) emitEvent("beforeUpgrade", payload.dump());
+    beforeUpgrade(payload.dump());
 
     response["success"] = true;
     return response;
@@ -901,19 +897,19 @@ LogosMap PackageManagerImpl::confirmUpgrade(const std::string& packageName,
 
     // On successful uninstall, tell PMU to drive the download+install step
     // for the new version. The impl layer has no LogosAPI access (it only
-    // communicates outward via the emitEvent callback), so we can't call
+    // communicates outward via the typed events), so we can't call
     // package_downloader directly. Instead we emit upgradeUninstallDone
     // with the pinned releaseTag — PMU subscribes to this event and reuses
     // its existing download+install chain (downloadPackageAsync →
     // installOnePackage). The user sees the row flip to "Installing" while
     // the download runs, then to "Installed" (or "Failed") when it finishes.
     bool ok = uninstallResult.value("success", false);
-    if (ok && emitEvent) {
+    if (ok) {
         LogosMap payload;
         payload["name"] = packageName;
         payload["releaseTag"] = releaseTag;
         payload["mode"] = mode;
-        emitEvent("upgradeUninstallDone", payload.dump());
+        upgradeUninstallDone(payload.dump());
     }
 
     return uninstallResult;
@@ -1061,7 +1057,7 @@ LogosMap PackageManagerImpl::requestMultiUninstall(const std::vector<std::string
     startAckTimerLocked(lock);
 
     lock.unlock();
-    if (emitEvent) emitEvent("beforeMultiUninstall", payload.dump());
+    beforeMultiUninstall(payload.dump());
 
     response["success"] = true;
     return response;

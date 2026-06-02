@@ -18,6 +18,12 @@
 #include <utility>
 #include <vector>
 
+// Qt-free event capture lives in the test framework (logos_test_events.h,
+// pulled in by <logos_test.h>); the module-specific event-method bodies these
+// drive are in package_manager_events_test.cpp.
+using logos_test::EventCapture;
+using logos_test::ScopedEventSink;
+
 LOGOS_TEST(onInit_does_not_throw) {
     auto t = LogosTestContext("package_manager");
     PackageManagerImpl impl;
@@ -34,10 +40,10 @@ LOGOS_TEST(installPlugin_success_core_emits_core_event) {
     std::string lastEvent;
     std::string lastEventData;
     PackageManagerImpl impl;
-    impl.emitEvent = [&](const std::string& name, const std::string& data) {
+    ScopedEventSink _sink([&](const std::string& name, const std::string& data) {
         lastEvent = name;
         lastEventData = data;
-    };
+    });
 
     LogosMap m = impl.installPlugin("/path/to/foo.lgx", false);
     LOGOS_ASSERT_EQ(m["path"].get<std::string>(), std::string("/installed/core.dylib"));
@@ -60,7 +66,7 @@ LOGOS_TEST(installPlugin_success_ui_emits_ui_event) {
 
     std::string lastEvent;
     PackageManagerImpl impl;
-    impl.emitEvent = [&](const std::string& name, const std::string&) { lastEvent = name; };
+    ScopedEventSink _sink([&](const std::string& name, const std::string&) { lastEvent = name; });
 
     LogosMap m = impl.installPlugin("/path/bar.lgx", false);
     LOGOS_ASSERT_FALSE(m["isCoreModule"].get<bool>());
@@ -75,7 +81,7 @@ LOGOS_TEST(installPlugin_failure_sets_error_no_event) {
 
     std::string lastEvent;
     PackageManagerImpl impl;
-    impl.emitEvent = [&](const std::string& name, const std::string&) { lastEvent = name; };
+    ScopedEventSink _sink([&](const std::string& name, const std::string&) { lastEvent = name; });
 
     LogosMap m = impl.installPlugin("/bad.lgx", false);
     LOGOS_ASSERT_TRUE(m["path"].get<std::string>().empty());
@@ -247,10 +253,10 @@ LOGOS_TEST(uninstallPackage_success_core_emits_core_event) {
     std::string lastEvent;
     std::string lastEventData;
     PackageManagerImpl impl;
-    impl.emitEvent = [&](const std::string& name, const std::string& data) {
+    ScopedEventSink _sink([&](const std::string& name, const std::string& data) {
         lastEvent = name;
         lastEventData = data;
-    };
+    });
 
     LogosMap m = impl.uninstallPackage("foo");
     LOGOS_ASSERT_TRUE(m["success"].get<bool>());
@@ -272,7 +278,7 @@ LOGOS_TEST(uninstallPackage_success_ui_emits_ui_event) {
 
     std::string lastEvent;
     PackageManagerImpl impl;
-    impl.emitEvent = [&](const std::string& name, const std::string&) { lastEvent = name; };
+    ScopedEventSink _sink([&](const std::string& name, const std::string&) { lastEvent = name; });
 
     LogosMap m = impl.uninstallPackage("widget");
     LOGOS_ASSERT_TRUE(m["success"].get<bool>());
@@ -291,7 +297,7 @@ LOGOS_TEST(uninstallPackage_failure_sets_error_no_event) {
 
     std::string lastEvent;
     PackageManagerImpl impl;
-    impl.emitEvent = [&](const std::string& name, const std::string&) { lastEvent = name; };
+    ScopedEventSink _sink([&](const std::string& name, const std::string&) { lastEvent = name; });
 
     LogosMap m = impl.uninstallPackage("foo");
     LOGOS_ASSERT_FALSE(m["success"].get<bool>());
@@ -539,60 +545,9 @@ LOGOS_TEST(verifyPackage_maps_signature_result) {
 
 namespace {
 
-// Thread-safe capture of (eventName, data) tuples emitted via
-// PackageManagerImpl::emitEvent, with a blocking wait helper for tests that
-// need to observe background-thread emissions (ack-timeout path).
-struct EventCapture {
-    struct Entry { std::string name; std::string data; };
-
-    std::mutex              mu;
-    std::condition_variable cv;
-    std::vector<Entry>      entries;
-
-    void record(const std::string& name, const std::string& data) {
-        std::lock_guard<std::mutex> lk(mu);
-        entries.push_back({name, data});
-        cv.notify_all();
-    }
-
-    // Install as emitEvent on a PackageManagerImpl.
-    auto callback() {
-        return [this](const std::string& n, const std::string& d) { record(n, d); };
-    }
-
-    size_t size() {
-        std::lock_guard<std::mutex> lk(mu);
-        return entries.size();
-    }
-
-    bool has(const std::string& name) {
-        std::lock_guard<std::mutex> lk(mu);
-        for (const auto& e : entries) if (e.name == name) return true;
-        return false;
-    }
-
-    // Returns {name,data} copies for all matching events.
-    std::vector<Entry> all(const std::string& name) {
-        std::lock_guard<std::mutex> lk(mu);
-        std::vector<Entry> out;
-        for (const auto& e : entries) if (e.name == name) out.push_back(e);
-        return out;
-    }
-
-    // Block up to `timeoutMs` waiting for at least one entry with `name`.
-    // Returns the first matching entry (copy), or an empty-string-name Entry
-    // on timeout.
-    Entry waitFor(const std::string& name, int timeoutMs) {
-        std::unique_lock<std::mutex> lk(mu);
-        bool got = cv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&] {
-            for (const auto& e : entries) if (e.name == name) return true;
-            return false;
-        });
-        if (!got) return {};
-        for (const auto& e : entries) if (e.name == name) return e;
-        return {};
-    }
-};
+// EventCapture / ScopedEventSink come from the test framework
+// (<logos_test.h>); the PackageManagerImpl event-method bodies they observe
+// are defined in package_manager_events_test.cpp (linked into both targets).
 
 // Convenience: registers `pkgName` as an installed user-package so
 // isEmbedded / installedDependentsNames return sensible values. `type` is
@@ -616,8 +571,6 @@ LOGOS_TEST(requestUninstall_rejects_empty_name) {
     auto t = LogosTestContext("package_manager");
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestUninstall("");
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
@@ -635,8 +588,6 @@ LOGOS_TEST(requestUninstall_rejects_embedded_package) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestUninstall("core_embed");
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
@@ -658,8 +609,6 @@ LOGOS_TEST(requestUninstall_happy_emits_beforeUninstall_with_dependents) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestUninstall("foo");
     LOGOS_ASSERT_TRUE(r["success"].get<bool>());
     LOGOS_ASSERT_FALSE(r.contains("error"));
@@ -682,8 +631,6 @@ LOGOS_TEST(requestUninstall_rejects_when_already_pending) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap first = impl.requestUninstall("foo");
     LOGOS_ASSERT_TRUE(first["success"].get<bool>());
 
@@ -701,8 +648,6 @@ LOGOS_TEST(requestUpgrade_rejects_empty_name) {
     auto t = LogosTestContext("package_manager");
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestUpgrade("", "v1.0.0", 0);
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
@@ -720,8 +665,6 @@ LOGOS_TEST(requestUpgrade_rejects_embedded_package) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestUpgrade("core_embed", "v2.0.0", 0);
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
@@ -735,8 +678,6 @@ LOGOS_TEST(requestUpgrade_happy_emits_beforeUpgrade_with_tag_and_mode) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestUpgrade("foo", "v2.0.0", 7);
     LOGOS_ASSERT_TRUE(r["success"].get<bool>());
 
@@ -756,8 +697,6 @@ LOGOS_TEST(requestUpgrade_rejects_when_already_pending) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v1.0.0", 0)["success"].get<bool>());
 
     // A second gated op (of either kind) must fail while another is pending.
@@ -779,8 +718,6 @@ LOGOS_TEST(ackPendingAction_success_on_pending_uninstall) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
 
     LogosMap ack = impl.ackPendingAction("foo");
@@ -805,8 +742,6 @@ LOGOS_TEST(ackPendingAction_name_mismatch_rejected) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
 
     LogosMap ack = impl.ackPendingAction("not_foo");
@@ -822,8 +757,6 @@ LOGOS_TEST(ackPendingAction_idempotent_on_repeat) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
     // Second ack should still succeed (same pending, already acked).
@@ -844,8 +777,6 @@ LOGOS_TEST(confirmUninstall_happy_performs_uninstall_and_emits_core_event) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -868,8 +799,6 @@ LOGOS_TEST(confirmUninstall_surfaces_uninstall_failure) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -895,8 +824,6 @@ LOGOS_TEST(confirmUninstall_name_mismatch_returns_error) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -917,8 +844,6 @@ LOGOS_TEST(confirmUpgrade_happy_emits_upgradeUninstallDone) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 3)["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -942,8 +867,6 @@ LOGOS_TEST(confirmUpgrade_suppresses_event_on_uninstall_failure) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -958,8 +881,6 @@ LOGOS_TEST(confirmUpgrade_tag_mismatch_returns_error) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -986,8 +907,6 @@ LOGOS_TEST(confirmUpgrade_requires_ack_before_confirm) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
 
     LogosMap r = impl.confirmUpgrade("foo", "v2.0.0");
@@ -1012,8 +931,6 @@ LOGOS_TEST(cancelUninstall_emits_uninstallCancelled_with_user_reason) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -1035,8 +952,6 @@ LOGOS_TEST(cancelUninstall_no_pending_returns_error) {
     auto t = LogosTestContext("package_manager");
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.cancelUninstall("foo");
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     LOGOS_ASSERT_FALSE(events.has("uninstallCancelled"));
@@ -1048,8 +963,6 @@ LOGOS_TEST(cancelUpgrade_emits_upgradeCancelled_with_tag_and_reason) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -1070,8 +983,6 @@ LOGOS_TEST(cancelUpgrade_tag_mismatch_returns_error) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -1095,8 +1006,6 @@ LOGOS_TEST(cancelUninstall_requires_ack_before_cancel) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
 
     LogosMap r = impl.cancelUninstall("foo");
@@ -1117,8 +1026,6 @@ LOGOS_TEST(cancelUpgrade_requires_ack_before_cancel) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
 
     LogosMap r = impl.cancelUpgrade("foo", "v2.0.0");
@@ -1144,8 +1051,6 @@ LOGOS_TEST(ackTimeout_fires_uninstallCancelled_with_timeout_reason) {
     // Hook must be set before requestUninstall — otherwise the worker is
     // already running with the 3s default.
     impl.setAckTimeoutMsForTest(30);
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
 
     // No ack within 30 ms — worker should fire uninstallCancelled.
@@ -1165,8 +1070,6 @@ LOGOS_TEST(ackTimeout_fires_upgradeCancelled_with_timeout_reason) {
     EventCapture events;
     PackageManagerImpl impl;
     impl.setAckTimeoutMsForTest(30);
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
 
     auto e = events.waitFor("upgradeCancelled", 1000);
@@ -1184,8 +1087,6 @@ LOGOS_TEST(ack_cancels_timer_no_timeout_event) {
     EventCapture events;
     PackageManagerImpl impl;
     impl.setAckTimeoutMsForTest(30);
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -1204,8 +1105,6 @@ LOGOS_TEST(confirmUninstall_cancels_timer_no_timeout_event) {
     EventCapture events;
     PackageManagerImpl impl;
     impl.setAckTimeoutMsForTest(30);
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.confirmUninstall("foo")["success"].get<bool>());
@@ -1223,8 +1122,6 @@ LOGOS_TEST(cancelUninstall_cancels_timer_only_user_reason_emitted) {
     EventCapture events;
     PackageManagerImpl impl;
     impl.setAckTimeoutMsForTest(30);
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.cancelUninstall("foo")["success"].get<bool>());
@@ -1246,8 +1143,6 @@ LOGOS_TEST(resetPendingAction_cancels_timer_no_timeout_event) {
     EventCapture events;
     PackageManagerImpl impl;
     impl.setAckTimeoutMsForTest(30);
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.resetPendingAction()["success"].get<bool>());
 
@@ -1266,8 +1161,6 @@ LOGOS_TEST(resetPendingAction_allows_new_request) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestUninstall("foo")["success"].get<bool>());
     // Without reset the second request fails:
     LOGOS_ASSERT_FALSE(impl.requestUninstall("foo")["success"].get<bool>());
@@ -1310,8 +1203,6 @@ LOGOS_TEST(requestMultiUninstall_rejects_empty_list) {
     auto t = LogosTestContext("package_manager");
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestMultiUninstall({});
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
@@ -1325,8 +1216,6 @@ LOGOS_TEST(requestMultiUninstall_rejects_empty_name_in_list) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestMultiUninstall({"foo", ""});
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
@@ -1348,8 +1237,6 @@ LOGOS_TEST(requestMultiUninstall_rejects_when_any_embedded) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestMultiUninstall({"foo", "core_embed"});
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     // Error message lists the offending embedded package(s).
@@ -1365,8 +1252,6 @@ LOGOS_TEST(requestMultiUninstall_rejects_when_already_pending) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap first = impl.requestMultiUninstall({"foo", "bar"});
     LOGOS_ASSERT_TRUE(first["success"].get<bool>());
 
@@ -1396,8 +1281,6 @@ LOGOS_TEST(requestMultiUninstall_emits_beforeMultiUninstall_with_names_and_depen
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LogosMap r = impl.requestMultiUninstall({"foo", "bar"});
     LOGOS_ASSERT_TRUE(r["success"].get<bool>());
     LOGOS_ASSERT_FALSE(r.contains("error"));
@@ -1446,8 +1329,6 @@ LOGOS_TEST(requestMultiUninstall_dependents_excludes_batch_members) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
 
     auto matches = events.all("beforeMultiUninstall");
@@ -1472,8 +1353,6 @@ LOGOS_TEST(ackPendingAction_works_using_first_batch_name) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
 
     // Per the impl: m_pendingAction.name is set to names[0], so single-name
@@ -1492,8 +1371,6 @@ LOGOS_TEST(confirmMultiUninstall_all_succeed_emits_per_package_events) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -1522,8 +1399,6 @@ LOGOS_TEST(confirmMultiUninstall_all_fail_returns_top_level_success_false) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -1556,8 +1431,6 @@ LOGOS_TEST(confirmMultiUninstall_name_mismatch_returns_error) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -1575,8 +1448,6 @@ LOGOS_TEST(confirmMultiUninstall_without_ack_returns_error) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
     // Skip ackPendingAction — confirm should fail.
     LogosMap r = impl.confirmMultiUninstall({"foo", "bar"});
@@ -1593,8 +1464,6 @@ LOGOS_TEST(cancelMultiUninstall_emits_multiUninstallCancelled_with_names_array) 
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -1628,8 +1497,6 @@ LOGOS_TEST(cancelMultiUninstall_name_mismatch_returns_error) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
@@ -1645,8 +1512,6 @@ LOGOS_TEST(requestMultiUninstall_blocks_subsequent_requestUninstall) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
 
     // A single-package request while a multi is pending must fail.
@@ -1664,8 +1529,6 @@ LOGOS_TEST(requestMultiUninstall_dedupes_duplicate_input_names) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     // Caller passes duplicates; impl must dedupe so doUninstall isn't called
     // twice for the same name in confirmMultiUninstall.
     LogosMap r = impl.requestMultiUninstall({"foo", "foo", "bar", "foo"});
@@ -1690,8 +1553,6 @@ LOGOS_TEST(confirmMultiUninstall_accepts_caller_with_duplicates) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     // Stored pending state holds the deduped list — confirm with the original
     // duplicated form must still match (both sides dedupe at the boundary)
     // and must call doUninstall exactly once per unique name.
@@ -1711,8 +1572,6 @@ LOGOS_TEST(ackPendingAction_accepts_any_name_in_multi_uninstall_batch) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar", "baz"})["success"].get<bool>());
 
     // Listener acks with the THIRD batch member — must succeed. Coupling the
@@ -1730,8 +1589,6 @@ LOGOS_TEST(ackPendingAction_rejects_name_not_in_multi_uninstall_batch) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    impl.emitEvent = events.callback();
-
     LOGOS_ASSERT_TRUE(impl.requestMultiUninstall({"foo", "bar"})["success"].get<bool>());
 
     // Names not in the batch must still be rejected — the relaxation is
