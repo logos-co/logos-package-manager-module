@@ -538,10 +538,11 @@ LOGOS_TEST(verifyPackage_maps_signature_result) {
 //               -> confirmXxx (destructive) | cancelXxx (aborts)
 //
 // The ack-timeout worker emits on a background thread, so every test uses
-// the thread-safe EventCapture helper below. Synchronous paths (request /
-// confirm / cancel) also go through the same capture to keep assertions
-// uniform. Timeout-path tests shrink the timeout via setAckTimeoutMsForTest
-// so they fire in milliseconds rather than the 3-second production default.
+// the thread-safe EventCapture from the test framework (<logos_test.h>).
+// Synchronous paths (request / confirm / cancel) also go through the same
+// capture to keep assertions uniform. Timeout-path tests shrink the timeout
+// via setAckTimeoutMsForTest so they fire in milliseconds rather than the
+// 3-second production default.
 
 namespace {
 

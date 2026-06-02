@@ -154,9 +154,10 @@ public:
     // Events this module emits to listeners (other modules / the host).
     // Declared Qt-`signals:`-style; the codegen supplies the bodies in
     // `package_manager_events.cpp`. Call them like ordinary methods —
-    // they no-op when no listener is wired (e.g. headless/unit-test use).
-    // The install/uninstall events carry a single path or package name;
-    // the gated-flow events carry a JSON payload string (see emit sites).
+    // they no-op when no listener is wired (e.g. a headless runtime with
+    // no subscribers). The install/uninstall events carry a single path or
+    // package name; the gated-flow events carry a JSON payload string (see
+    // emit sites).
 logos_events:
     void corePluginFileInstalled(const std::string& path);
     void uiPluginFileInstalled(const std::string& path);

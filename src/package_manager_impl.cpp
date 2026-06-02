@@ -127,11 +127,12 @@ PackageManagerImpl::PackageManagerImpl()
 
 PackageManagerImpl::~PackageManagerImpl()
 {
-    // Signal any running worker thread to exit, then join it before
-    // tearing down state it might still reference (m_pendingAction, the
-    // typed-event callback). The lock is taken briefly to publish m_ackShutdown and
-    // bump m_ackGeneration atomically; notify + join happen outside the
-    // lock so the worker can re-acquire and exit its wait_for.
+    // Signal any running worker thread to exit, then join it before tearing
+    // down state it might still reference (m_pendingAction, read when the
+    // worker emits its cancellation event via the typed event methods). The
+    // lock is taken briefly to publish m_ackShutdown and bump m_ackGeneration
+    // atomically; notify + join happen outside the lock so the worker can
+    // re-acquire and exit its wait_for.
     {
         std::lock_guard<std::mutex> lk(m_stateMutex);
         m_ackShutdown = true;
