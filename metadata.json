@@ -1,5 +1,6 @@
 {
   "name": "package_manager",
+  "display_name": "Package Manager",
   "version": "1.0.0",
   "description": "Plugin manager for the Logos system",
   "author": "Logos Core Team",
