@@ -34,6 +34,7 @@ LogosMap toLogosMap(const InstalledPackage& p)
 {
     LogosMap m = LogosMap::object();
     m["name"]         = p.name;
+    m["displayName"]  = p.displayName;
     m["version"]      = p.version;
     m["description"]  = p.description;
     m["type"]         = p.type;
