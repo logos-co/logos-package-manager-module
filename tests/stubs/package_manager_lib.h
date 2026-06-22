@@ -51,6 +51,7 @@ struct Hashes {
 // Mirrors InstalledPackage in package_manager_lib.h.
 struct InstalledPackage {
     std::string name;
+    std::string displayName;
     std::string version;
     std::string description;
     std::string type;
