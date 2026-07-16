@@ -649,7 +649,7 @@ LOGOS_TEST(requestUpgrade_rejects_empty_name) {
     auto t = LogosTestContext("package_manager");
     EventCapture events;
     PackageManagerImpl impl;
-    LogosMap r = impl.requestUpgrade("", "v1.0.0", 0);
+    LogosMap r = impl.requestUpgrade("", "v1.0.0", 0, "");
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
                     std::string("Package name cannot be empty"));
@@ -666,7 +666,7 @@ LOGOS_TEST(requestUpgrade_rejects_embedded_package) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LogosMap r = impl.requestUpgrade("core_embed", "v2.0.0", 0);
+    LogosMap r = impl.requestUpgrade("core_embed", "v2.0.0", 0, "");
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
     LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
                     std::string("Cannot upgrade embedded module 'core_embed'"));
@@ -679,7 +679,7 @@ LOGOS_TEST(requestUpgrade_happy_emits_beforeUpgrade_with_tag_and_mode) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LogosMap r = impl.requestUpgrade("foo", "v2.0.0", 7);
+    LogosMap r = impl.requestUpgrade("foo", "v2.0.0", 7, "");
     LOGOS_ASSERT_TRUE(r["success"].get<bool>());
 
     auto matches = events.all("beforeUpgrade");
@@ -698,7 +698,7 @@ LOGOS_TEST(requestUpgrade_rejects_when_already_pending) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v1.0.0", 0)["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v1.0.0", 0, "")["success"].get<bool>());
 
     // A second gated op (of either kind) must fail while another is pending.
     LogosMap blocked = impl.requestUninstall("foo");
@@ -845,7 +845,7 @@ LOGOS_TEST(confirmUpgrade_happy_emits_upgradeUninstallDone) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 3)["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 3, "")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
     LogosMap r = impl.confirmUpgrade("foo", "v2.0.0");
@@ -868,7 +868,7 @@ LOGOS_TEST(confirmUpgrade_suppresses_event_on_uninstall_failure) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0, "")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
     LogosMap r = impl.confirmUpgrade("foo", "v2.0.0");
@@ -882,7 +882,7 @@ LOGOS_TEST(confirmUpgrade_tag_mismatch_returns_error) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0, "")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
     LogosMap r = impl.confirmUpgrade("foo", "v3.0.0");
@@ -908,7 +908,7 @@ LOGOS_TEST(confirmUpgrade_requires_ack_before_confirm) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0, "")["success"].get<bool>());
 
     LogosMap r = impl.confirmUpgrade("foo", "v2.0.0");
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
@@ -920,6 +920,147 @@ LOGOS_TEST(confirmUpgrade_requires_ack_before_confirm) {
     // prior ack for protocol uniformity — see cancelUpgrade_requires_ack_before_cancel.
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.cancelUpgrade("foo", "v2.0.0")["success"].get<bool>());
+}
+
+// ---------------------------------------------------------------------------
+// requestInstall / confirmInstall / cancelInstall: the fresh-install gate.
+// Mirrors the upgrade gate but with no in-module uninstall step — confirm
+// emits installApproved so the initiator runs its own download+install.
+// ---------------------------------------------------------------------------
+
+LOGOS_TEST(requestInstall_rejects_empty_name) {
+    auto t = LogosTestContext("package_manager");
+    EventCapture events;
+    PackageManagerImpl impl;
+    LogosMap r = impl.requestInstall("", "v1.0.0", "https://repo", "");
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
+                    std::string("Package name cannot be empty"));
+    LOGOS_ASSERT_FALSE(events.has("beforeInstall"));
+}
+
+LOGOS_TEST(requestInstall_happy_emits_beforeInstall_with_repo_and_depChanges) {
+    auto t = LogosTestContext("package_manager");
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    // A fresh install need not be already installed — the gate is pure
+    // confirmation. depChanges is opaque JSON the host dialog will render.
+    const std::string depChanges =
+        "[{\"name\":\"dep1\",\"action\":\"install\",\"toVersion\":\"1.2.0\"}]";
+    LogosMap r = impl.requestInstall("newpkg", "v1.0.0", "https://repo/x", depChanges);
+    LOGOS_ASSERT_TRUE(r["success"].get<bool>());
+
+    auto matches = events.all("beforeInstall");
+    LOGOS_ASSERT_EQ(matches.size(), static_cast<size_t>(1));
+    LogosMap payload = LogosMap::parse(matches[0].data);
+    LOGOS_ASSERT_EQ(payload["name"].get<std::string>(), std::string("newpkg"));
+    LOGOS_ASSERT_EQ(payload["releaseTag"].get<std::string>(), std::string("v1.0.0"));
+    LOGOS_ASSERT_EQ(payload["repositoryUrl"].get<std::string>(), std::string("https://repo/x"));
+    // depChanges is embedded as a parsed JSON array, not a re-stringified blob.
+    LOGOS_ASSERT_TRUE(payload["depChanges"].is_array());
+    LOGOS_ASSERT_EQ(payload["depChanges"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(payload["depChanges"][0]["name"].get<std::string>(), std::string("dep1"));
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(requestInstall_empty_depChanges_yields_empty_array) {
+    auto t = LogosTestContext("package_manager");
+    EventCapture events;
+    PackageManagerImpl impl;
+    LOGOS_ASSERT_TRUE(impl.requestInstall("newpkg", "v1.0.0", "", "")["success"].get<bool>());
+
+    LogosMap payload = LogosMap::parse(events.all("beforeInstall")[0].data);
+    LOGOS_ASSERT_TRUE(payload["depChanges"].is_array());
+    LOGOS_ASSERT_EQ(payload["depChanges"].size(), static_cast<size_t>(0));
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(requestInstall_rejects_when_already_pending) {
+    auto t = LogosTestContext("package_manager");
+    EventCapture events;
+    PackageManagerImpl impl;
+    LOGOS_ASSERT_TRUE(impl.requestInstall("newpkg", "v1.0.0", "", "")["success"].get<bool>());
+
+    LogosMap blocked = impl.requestInstall("other", "v1.0.0", "", "");
+    LOGOS_ASSERT_FALSE(blocked["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(blocked["error"].get<std::string>().find("install") != std::string::npos);
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(confirmInstall_happy_emits_installApproved) {
+    auto t = LogosTestContext("package_manager");
+    EventCapture events;
+    PackageManagerImpl impl;
+    LOGOS_ASSERT_TRUE(impl.requestInstall("newpkg", "v1.0.0", "https://repo/x", "")["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("newpkg")["success"].get<bool>());
+
+    LogosMap r = impl.confirmInstall("newpkg");
+    LOGOS_ASSERT_TRUE(r["success"].get<bool>());
+
+    auto approved = events.all("installApproved");
+    LOGOS_ASSERT_EQ(approved.size(), static_cast<size_t>(1));
+    LogosMap payload = LogosMap::parse(approved[0].data);
+    LOGOS_ASSERT_EQ(payload["name"].get<std::string>(), std::string("newpkg"));
+    LOGOS_ASSERT_EQ(payload["releaseTag"].get<std::string>(), std::string("v1.0.0"));
+    LOGOS_ASSERT_EQ(payload["repositoryUrl"].get<std::string>(), std::string("https://repo/x"));
+
+    // Gate cleared — a fresh request must now succeed.
+    LOGOS_ASSERT_TRUE(impl.requestInstall("again", "v1.0.0", "", "")["success"].get<bool>());
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(confirmInstall_requires_ack_before_confirm) {
+    auto t = LogosTestContext("package_manager");
+    EventCapture events;
+    PackageManagerImpl impl;
+    LOGOS_ASSERT_TRUE(impl.requestInstall("newpkg", "v1.0.0", "", "")["success"].get<bool>());
+
+    LogosMap r = impl.confirmInstall("newpkg");
+    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(r["error"].get<std::string>().find("has not been acknowledged") != std::string::npos);
+    LOGOS_ASSERT_FALSE(events.has("installApproved"));
+
+    impl.resetPendingAction();
+}
+
+LOGOS_TEST(cancelInstall_emits_installCancelled_with_user_reason) {
+    auto t = LogosTestContext("package_manager");
+    EventCapture events;
+    PackageManagerImpl impl;
+    LOGOS_ASSERT_TRUE(impl.requestInstall("newpkg", "v1.0.0", "https://repo/x", "")["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("newpkg")["success"].get<bool>());
+
+    LogosMap r = impl.cancelInstall("newpkg");
+    LOGOS_ASSERT_TRUE(r["success"].get<bool>());
+
+    auto cancelled = events.all("installCancelled");
+    LOGOS_ASSERT_EQ(cancelled.size(), static_cast<size_t>(1));
+    LogosMap payload = LogosMap::parse(cancelled[0].data);
+    LOGOS_ASSERT_EQ(payload["name"].get<std::string>(), std::string("newpkg"));
+    LOGOS_ASSERT_EQ(payload["reason"].get<std::string>(), std::string("user cancelled"));
+    LOGOS_ASSERT_FALSE(events.has("installApproved"));
+}
+
+LOGOS_TEST(requestUpgrade_carries_depChanges_in_beforeUpgrade) {
+    auto t = LogosTestContext("package_manager");
+    primeInstalledUserPackage("foo");
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    const std::string depChanges =
+        "[{\"name\":\"dep1\",\"action\":\"upgrade\",\"fromVersion\":\"1.0.0\",\"toVersion\":\"1.2.0\"}]";
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0, depChanges)["success"].get<bool>());
+
+    LogosMap payload = LogosMap::parse(events.all("beforeUpgrade")[0].data);
+    LOGOS_ASSERT_TRUE(payload["depChanges"].is_array());
+    LOGOS_ASSERT_EQ(payload["depChanges"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(payload["depChanges"][0]["action"].get<std::string>(), std::string("upgrade"));
+
+    impl.resetPendingAction();
 }
 
 // ---------------------------------------------------------------------------
@@ -964,7 +1105,7 @@ LOGOS_TEST(cancelUpgrade_emits_upgradeCancelled_with_tag_and_reason) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0, "")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
     LogosMap r = impl.cancelUpgrade("foo", "v2.0.0");
@@ -984,7 +1125,7 @@ LOGOS_TEST(cancelUpgrade_tag_mismatch_returns_error) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0, "")["success"].get<bool>());
     LOGOS_ASSERT_TRUE(impl.ackPendingAction("foo")["success"].get<bool>());
 
     LogosMap r = impl.cancelUpgrade("foo", "v9.9.9");
@@ -1027,7 +1168,7 @@ LOGOS_TEST(cancelUpgrade_requires_ack_before_cancel) {
 
     EventCapture events;
     PackageManagerImpl impl;
-    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0, "")["success"].get<bool>());
 
     LogosMap r = impl.cancelUpgrade("foo", "v2.0.0");
     LOGOS_ASSERT_FALSE(r["success"].get<bool>());
@@ -1071,7 +1212,7 @@ LOGOS_TEST(ackTimeout_fires_upgradeCancelled_with_timeout_reason) {
     EventCapture events;
     PackageManagerImpl impl;
     impl.setAckTimeoutMsForTest(30);
-    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0)["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("foo", "v2.0.0", 0, "")["success"].get<bool>());
 
     auto e = events.waitFor("upgradeCancelled", 1000);
     LOGOS_ASSERT_EQ(e.name, std::string("upgradeCancelled"));
