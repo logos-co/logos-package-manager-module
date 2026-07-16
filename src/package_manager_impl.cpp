@@ -1058,6 +1058,13 @@ static std::vector<std::string> dedupeNamesPreserveOrder(
 
 LogosMap PackageManagerImpl::confirmInstall(const std::string& packageName)
 {
+    // A fresh install removes nothing first — unlike confirmUpgrade there is no
+    // doUninstall step. Validate, capture the echo fields, and clear the gate in
+    // ONE critical section so a concurrent cancel / reset / ack-timeout can't swap
+    // the pending action out between the check and the capture (which would make
+    // installApproved carry an empty/wrong payload). Emit outside the lock —
+    // listeners may call back in synchronously.
+    LogosMap payload;
     {
         std::lock_guard<std::mutex> lock(m_stateMutex);
         if (m_pendingAction.op != PendingOp::Install || m_pendingAction.name != packageName) {
@@ -1072,15 +1079,6 @@ LogosMap PackageManagerImpl::confirmInstall(const std::string& packageName)
             response["error"] = "Pending install for '" + packageName + "' has not been acknowledged";
             return response;
         }
-    }
-
-    // A fresh install removes nothing first — unlike confirmUpgrade there is no
-    // doUninstall step. We just clear the gate and tell the initiator (PMU) to
-    // run its download + install chain. Capture the echo fields under the lock,
-    // then emit outside it (listeners may call back in synchronously).
-    LogosMap payload;
-    {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
         payload["name"] = m_pendingAction.name;
         payload["releaseTag"] = m_pendingAction.releaseTag;
         payload["repositoryUrl"] = m_pendingAction.repositoryUrl;

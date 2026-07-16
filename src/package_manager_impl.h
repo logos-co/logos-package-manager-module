@@ -131,9 +131,10 @@ public:
     // changes the initiator resolved for this operation (each entry shaped
     // { name, action, fromVersion, toVersion, repository }). It is echoed into
     // the beforeUpgrade / beforeInstall payload so the host's confirmation
-    // dialog can list exactly what else will change — the module treats it as
-    // opaque display data and never parses or acts on it. Empty string = the
-    // initiator resolved no changes (or didn't compute any).
+    // dialog can list exactly what else will change. The module parses it only
+    // to re-embed it as a JSON array in the payload (via attachDepChanges) and
+    // never interprets or acts on its contents — it is opaque display data.
+    // Empty string = the initiator resolved no changes (or didn't compute any).
     LogosMap requestUpgrade(const std::string& packageName, const std::string& releaseTag,
                             int64_t mode, const std::string& depChanges);
 
