@@ -17,8 +17,11 @@ void PackageManagerImpl::corePluginUninstalled(const std::string& name)      { r
 void PackageManagerImpl::uiPluginUninstalled(const std::string& name)        { recordEvent("uiPluginUninstalled", name); }
 void PackageManagerImpl::beforeUninstall(const std::string& payload)         { recordEvent("beforeUninstall", payload); }
 void PackageManagerImpl::beforeUpgrade(const std::string& payload)           { recordEvent("beforeUpgrade", payload); }
+void PackageManagerImpl::beforeInstall(const std::string& payload)           { recordEvent("beforeInstall", payload); }
 void PackageManagerImpl::beforeMultiUninstall(const std::string& payload)    { recordEvent("beforeMultiUninstall", payload); }
 void PackageManagerImpl::uninstallCancelled(const std::string& payload)      { recordEvent("uninstallCancelled", payload); }
 void PackageManagerImpl::upgradeCancelled(const std::string& payload)        { recordEvent("upgradeCancelled", payload); }
+void PackageManagerImpl::installCancelled(const std::string& payload)        { recordEvent("installCancelled", payload); }
 void PackageManagerImpl::multiUninstallCancelled(const std::string& payload) { recordEvent("multiUninstallCancelled", payload); }
 void PackageManagerImpl::upgradeUninstallDone(const std::string& payload)    { recordEvent("upgradeUninstallDone", payload); }
+void PackageManagerImpl::installApproved(const std::string& payload)         { recordEvent("installApproved", payload); }

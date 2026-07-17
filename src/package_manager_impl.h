@@ -127,7 +127,26 @@ public:
     // Only one gated flow can be pending globally (across packages and ops).
     // A second requestXxx while one is pending returns { success: false, error: ... }.
     LogosMap requestUninstall(const std::string& packageName);
-    LogosMap requestUpgrade(const std::string& packageName, const std::string& releaseTag, int64_t mode);
+    // `depChanges` is an optional JSON array of the transitive dependency
+    // changes the initiator resolved for this operation (each entry shaped
+    // { name, action, fromVersion, toVersion, repository }). It is echoed into
+    // the beforeUpgrade / beforeInstall payload so the host's confirmation
+    // dialog can list exactly what else will change. The module parses it only
+    // to re-embed it as a JSON array in the payload (via attachDepChanges) and
+    // never interprets or acts on its contents — it is opaque display data.
+    // Empty string = the initiator resolved no changes (or didn't compute any).
+    LogosMap requestUpgrade(const std::string& packageName, const std::string& releaseTag,
+                            int64_t mode, const std::string& depChanges);
+
+    // Fresh-install gate — the confirmation-only sibling of requestUpgrade.
+    // Gates a not-yet-installed package behind the same listener-ack protocol
+    // so the host shows one confirmation dialog before anything is downloaded.
+    // confirmInstall emits "installApproved" (nothing is uninstalled first);
+    // cancelInstall / the ack timeout emit "installCancelled".
+    LogosMap requestInstall(const std::string& packageName, const std::string& releaseTag,
+                            const std::string& repositoryUrl, const std::string& depChanges);
+    LogosMap confirmInstall(const std::string& packageName);
+    LogosMap cancelInstall(const std::string& packageName);
 
     LogosMap ackPendingAction(const std::string& packageName);
 
@@ -165,20 +184,29 @@ logos_events:
     void uiPluginUninstalled(const std::string& packageName);
     void beforeUninstall(const std::string& payload);
     void beforeUpgrade(const std::string& payload);
+    void beforeInstall(const std::string& payload);
     void beforeMultiUninstall(const std::string& payload);
     void uninstallCancelled(const std::string& payload);
     void upgradeCancelled(const std::string& payload);
+    void installCancelled(const std::string& payload);
     void multiUninstallCancelled(const std::string& payload);
     void upgradeUninstallDone(const std::string& payload);
+    // Fresh-install gate approval. Unlike upgrade (which uninstalls the old
+    // version in-module and signals upgradeUninstallDone), a fresh install has
+    // nothing to remove first: confirmInstall simply emits this so the
+    // initiator (PMU) runs its download + install chain for the approved
+    // package. Payload: { name, releaseTag, repositoryUrl }.
+    void installApproved(const std::string& payload);
 
 private:
-    enum class PendingOp { None, Uninstall, Upgrade, MultiUninstall };
+    enum class PendingOp { None, Uninstall, Upgrade, Install, MultiUninstall };
 
     struct PendingAction {
         PendingOp   op = PendingOp::None;
-        std::string name;             // Uninstall / Upgrade only; empty for MultiUninstall (which uses `names`).
+        std::string name;             // Uninstall / Upgrade / Install; empty for MultiUninstall (which uses `names`).
         std::vector<std::string> names; // MultiUninstall only — full deduped batch
-        std::string releaseTag;        // upgrade only
+        std::string releaseTag;        // upgrade / install only
+        std::string repositoryUrl;     // install only — echoed back in installApproved
         int64_t     mode = 0;          // upgrade only (UpgradeMode enum as int)
         bool        acked = false;
     };

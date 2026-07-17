@@ -532,6 +532,7 @@ const char* PackageManagerImpl::opName(PendingOp op)
     switch (op) {
         case PendingOp::Uninstall:      return "uninstall";
         case PendingOp::Upgrade:        return "upgrade";
+        case PendingOp::Install:        return "install";
         case PendingOp::MultiUninstall: return "multi-uninstall";
         case PendingOp::None:           return "none";
     }
@@ -669,6 +670,11 @@ void PackageManagerImpl::emitCancellation(const PendingAction& pa, const std::st
     } else if (pa.op == PendingOp::Uninstall) {
         payload["name"] = pa.name;
         uninstallCancelled(payload.dump());
+    } else if (pa.op == PendingOp::Install) {
+        payload["name"] = pa.name;
+        payload["releaseTag"] = pa.releaseTag;
+        payload["repositoryUrl"] = pa.repositoryUrl;
+        installCancelled(payload.dump());
     } else if (pa.op == PendingOp::MultiUninstall) {
         LogosList names = LogosList::array();
         for (const auto& n : pa.names) names.push_back(n);
@@ -731,9 +737,30 @@ LogosMap PackageManagerImpl::requestUninstall(const std::string& packageName)
     return response;
 }
 
+// Parse the initiator-supplied depChanges JSON (array of change records) and
+// attach it to a gated-flow event payload under "depChanges". The module never
+// interprets it — it's opaque display data for the host's confirmation dialog —
+// so a malformed / empty string simply yields an empty array rather than an
+// error (the dialog then shows "no other packages need to change").
+static void attachDepChanges(LogosMap& payload, const std::string& depChanges)
+{
+    LogosList changes = LogosList::array();
+    if (!depChanges.empty()) {
+        try {
+            LogosMap parsed = LogosMap::parse(depChanges);
+            if (parsed.is_array())
+                changes = std::move(parsed);
+        } catch (...) {
+            // leave `changes` empty on any parse failure
+        }
+    }
+    payload["depChanges"] = changes;
+}
+
 LogosMap PackageManagerImpl::requestUpgrade(const std::string& packageName,
                                              const std::string& releaseTag,
-                                             int64_t mode)
+                                             int64_t mode,
+                                             const std::string& depChanges)
 {
     LogosMap response;
     // Same rationale as requestUninstall: empty name has to be rejected
@@ -774,11 +801,54 @@ LogosMap PackageManagerImpl::requestUpgrade(const std::string& packageName,
     for (const auto& d : installedDependentsNames(packageName))
         deps.push_back(d);
     payload["installedDependents"] = deps;
+    attachDepChanges(payload, depChanges);
 
     startAckTimerLocked(lock);
 
     lock.unlock();
     beforeUpgrade(payload.dump());
+
+    response["success"] = true;
+    return response;
+}
+
+LogosMap PackageManagerImpl::requestInstall(const std::string& packageName,
+                                             const std::string& releaseTag,
+                                             const std::string& repositoryUrl,
+                                             const std::string& depChanges)
+{
+    LogosMap response;
+    if (packageName.empty()) {
+        response["success"] = false;
+        response["error"] = "Package name cannot be empty";
+        return response;
+    }
+
+    std::unique_lock<std::mutex> lock(m_stateMutex);
+
+    if (m_pendingAction.op != PendingOp::None) {
+        response["success"] = false;
+        response["error"] = pendingDescriptionLocked();
+        return response;
+    }
+
+    m_pendingAction = {};
+    m_pendingAction.op = PendingOp::Install;
+    m_pendingAction.name = packageName;
+    m_pendingAction.releaseTag = releaseTag;
+    m_pendingAction.repositoryUrl = repositoryUrl;
+    m_pendingAction.acked = false;
+
+    LogosMap payload;
+    payload["name"] = packageName;
+    payload["releaseTag"] = releaseTag;
+    payload["repositoryUrl"] = repositoryUrl;
+    attachDepChanges(payload, depChanges);
+
+    startAckTimerLocked(lock);
+
+    lock.unlock();
+    beforeInstall(payload.dump());
 
     response["success"] = true;
     return response;
@@ -985,6 +1055,70 @@ static std::vector<std::string> dedupeNamesPreserveOrder(
 }
 
 } // namespace
+
+LogosMap PackageManagerImpl::confirmInstall(const std::string& packageName)
+{
+    // A fresh install removes nothing first — unlike confirmUpgrade there is no
+    // doUninstall step. Validate, capture the echo fields, and clear the gate in
+    // ONE critical section so a concurrent cancel / reset / ack-timeout can't swap
+    // the pending action out between the check and the capture (which would make
+    // installApproved carry an empty/wrong payload). Emit outside the lock —
+    // listeners may call back in synchronously.
+    LogosMap payload;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        if (m_pendingAction.op != PendingOp::Install || m_pendingAction.name != packageName) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "No matching pending install for '" + packageName + "'";
+            return response;
+        }
+        if (!m_pendingAction.acked) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "Pending install for '" + packageName + "' has not been acknowledged";
+            return response;
+        }
+        payload["name"] = m_pendingAction.name;
+        payload["releaseTag"] = m_pendingAction.releaseTag;
+        payload["repositoryUrl"] = m_pendingAction.repositoryUrl;
+        m_pendingAction = {};
+        stopAckTimerLocked();
+    }
+    installApproved(payload.dump());
+
+    LogosMap response;
+    response["success"] = true;
+    return response;
+}
+
+LogosMap PackageManagerImpl::cancelInstall(const std::string& packageName)
+{
+    PendingAction pa;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        if (m_pendingAction.op != PendingOp::Install || m_pendingAction.name != packageName) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "No matching pending install for '" + packageName + "'";
+            return response;
+        }
+        // See cancelUninstall for why cancel also requires prior ack.
+        if (!m_pendingAction.acked) {
+            LogosMap response;
+            response["success"] = false;
+            response["error"] = "Pending install for '" + packageName + "' has not been acknowledged";
+            return response;
+        }
+        pa = m_pendingAction;
+        m_pendingAction = {};
+        stopAckTimerLocked();
+    }
+    emitCancellation(pa, "user cancelled");
+    LogosMap response;
+    response["success"] = true;
+    return response;
+}
 
 LogosMap PackageManagerImpl::requestMultiUninstall(const std::vector<std::string>& packageNamesIn)
 {
