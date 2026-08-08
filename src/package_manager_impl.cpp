@@ -156,13 +156,23 @@ LogosMap PackageManagerImpl::installPlugin(const std::string& pluginPath, bool s
         &installedPluginPath, &isCoreModule
     );
 
+    // The library reports success by returning a non-empty install location.
+    // installedPluginPath is a REPORTING detail, not the success signal: a
+    // QML-only ui_qml package ("main": {}) has no backend library, so it used
+    // to come back empty from a perfectly good install. Gating on it here had
+    // two consequences — uiPluginFileInstalled never fired (so Basecamp only
+    // discovered the plugin after a restart) and response["path"] was empty,
+    // which logos-package-manager-ui reads as failure and renders as a red
+    // RETRY. Patched libraries always fill installedPluginPath in; the `result`
+    // fallback keeps this correct against an older one.
     bool success = !result.empty();
+    const std::string reportedPath = installedPluginPath.empty() ? result : installedPluginPath;
 
-    if (success && !installedPluginPath.empty()) {
+    if (success) {
         if (isCoreModule) {
-            corePluginFileInstalled(installedPluginPath);
+            corePluginFileInstalled(reportedPath);
         } else {
-            uiPluginFileInstalled(installedPluginPath);
+            uiPluginFileInstalled(reportedPath);
         }
     }
 
@@ -173,7 +183,7 @@ LogosMap PackageManagerImpl::installPlugin(const std::string& pluginPath, bool s
 
     LogosMap response;
     response["name"] = stem;
-    response["path"] = success ? installedPluginPath : std::string();
+    response["path"] = success ? reportedPath : std::string();
     response["isCoreModule"] = isCoreModule;
     if (!success) {
         response["error"] = errorMsg;

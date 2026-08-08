@@ -32,7 +32,7 @@ All methods are accessible via LogosAPI from other modules and UI plugins.
 
 | Method | Return | Description |
 |--------|--------|-------------|
-| `installPlugin(path, skipIfNotNewer)` | `QVariantMap` | Install a local `.lgx` file. Returns `{name, path, isCoreModule, signatureStatus, error}`. When `signatureStatus` is `"signed"` or `"invalid"`, also includes `signerDid`, `signerName`, `signerUrl`, `trustedAs`. When `signatureStatus` is `"error"`, includes `signatureError`. |
+| `installPlugin(path, skipIfNotNewer)` | `QVariantMap` | Install a local `.lgx` file. Returns `{name, path, isCoreModule, signatureStatus, error}`. Success is the **absence** of `error`; `path` is the installed main file, or the installed module directory for a package with no main (QML-only `ui_qml`), and is non-empty on success. When `signatureStatus` is `"signed"` or `"invalid"`, also includes `signerDid`, `signerName`, `signerUrl`, `trustedAs`. When `signatureStatus` is `"error"`, includes `signatureError`. |
 | `inspectPackage(lgxPath)` | `QVariantMap` | Inspect an LGX file **without installing**. Returns metadata + install status: `{name, version, type, description, category, rootHash, signatureStatus, signerDid?, signerName?, isAlreadyInstalled, installedVersion?, installedHash?, installedDependents?, variants}`. `rootHash` is the Merkle tree root from `manifest.hashes.root` — the same identifier the online catalog exposes. When `isAlreadyInstalled` is true, `installedHash` is the corresponding value from the on-disk manifest. Used by callers (e.g. Basecamp) to show a confirmation dialog before committing. |
 | `uninstallPackage(packageName)` | `QVariantMap` | Remove a user-installed package immediately (ungated). Refuses embedded packages. Returns `{success, error?, removedFiles?}`. On success emits `corePluginUninstalled` or `uiPluginUninstalled`. **Headless callers** (lgpm, scripts) should use this. GUI callers should prefer `requestUninstall` below. |
 
@@ -109,6 +109,14 @@ Only **one** gated flow can be pending globally (across all packages and both op
 | `uiPluginFileInstalled` | `[path]` | Emitted after a UI plugin `.lgx` is installed |
 | `corePluginUninstalled` | `[name]` | Emitted after a core module is uninstalled |
 | `uiPluginUninstalled` | `[name]` | Emitted after a UI plugin is uninstalled |
+
+The install events' `path` is the installed main file when the package ships
+one, and the installed module **directory** when it does not — a QML-only
+`ui_qml` package has no backend library, so its manifest carries an empty
+`"main"`. Treat it as an opaque location, not as a file: do not `QPluginLoader`
+it or take its `fileName()`. To load a UI plugin, react to the event by
+rescanning with `getInstalledUiPlugins()` and use the `mainFilePath` / `view`
+fields from there (that is what Basecamp does).
 
 **Gated flow events** (see "Gated Uninstall / Upgrade Flow" above):
 
