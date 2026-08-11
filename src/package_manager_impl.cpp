@@ -42,6 +42,7 @@ LogosMap toLogosMap(const InstalledPackage& p)
     m["author"]       = p.author;
     m["license"]      = p.license;
     m["icon"]         = p.icon;
+    m["manifestVersion"] = p.manifestVersion;
     m["view"]         = p.view;
 
     LogosList deps = LogosList::array();
