@@ -73,6 +73,61 @@ LOGOS_TEST(installPlugin_success_ui_emits_ui_event) {
     LOGOS_ASSERT_EQ(lastEvent, std::string("uiPluginFileInstalled"));
 }
 
+// A QML-only ui_qml package has no backend library, so the library reports the
+// installed module DIRECTORY rather than a main file. That must still be a
+// success: event emitted, non-empty "path", no "error" key. Before the fix the
+// library handed back an empty string here and the impl gated its event on it,
+// so uiPluginFileInstalled never fired and logos-package-manager-ui — which
+// treats an empty "path" as failure — rendered a red RETRY on a package that
+// had installed perfectly.
+LOGOS_TEST(installPlugin_ui_qml_without_main_emits_event_with_directory_path) {
+    auto t = LogosTestContext("package_manager");
+    t.mockCFunction("installPluginFile_result").returns("/user/ui_plugins");
+    t.mockCFunction("installPluginFile_installedPath").returns("/user/ui_plugins/hello_ui");
+    t.mockCFunction("installPluginFile_error").returns("");
+    t.mockCFunction("installPluginFile_isCore").returns(false);
+
+    std::string lastEvent;
+    std::string lastEventData;
+    PackageManagerImpl impl;
+    ScopedEventSink _sink([&](const std::string& name, const std::string& data) {
+        lastEvent = name;
+        lastEventData = data;
+    });
+
+    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false);
+    LOGOS_ASSERT_EQ(m["path"].get<std::string>(), std::string("/user/ui_plugins/hello_ui"));
+    LOGOS_ASSERT_FALSE(m.contains("error"));
+    LOGOS_ASSERT_EQ(lastEvent, std::string("uiPluginFileInstalled"));
+    LOGOS_ASSERT_EQ(lastEventData, std::string("/user/ui_plugins/hello_ui"));
+}
+
+// Defence in depth against an OLDER logos-package-manager that still leaves
+// installedPluginPath empty for a QML-only package: the impl must not take the
+// empty value as failure. It falls back to the library's return value (the
+// install root), which keeps the event firing and "path" non-empty.
+LOGOS_TEST(installPlugin_empty_installedPath_still_succeeds_via_result_fallback) {
+    auto t = LogosTestContext("package_manager");
+    t.mockCFunction("installPluginFile_result").returns("/user/ui_plugins");
+    t.mockCFunction("installPluginFile_installedPath").returns("");
+    t.mockCFunction("installPluginFile_error").returns("");
+    t.mockCFunction("installPluginFile_isCore").returns(false);
+
+    std::string lastEvent;
+    std::string lastEventData;
+    PackageManagerImpl impl;
+    ScopedEventSink _sink([&](const std::string& name, const std::string& data) {
+        lastEvent = name;
+        lastEventData = data;
+    });
+
+    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false);
+    LOGOS_ASSERT_EQ(m["path"].get<std::string>(), std::string("/user/ui_plugins"));
+    LOGOS_ASSERT_FALSE(m.contains("error"));
+    LOGOS_ASSERT_EQ(lastEvent, std::string("uiPluginFileInstalled"));
+    LOGOS_ASSERT_EQ(lastEventData, std::string("/user/ui_plugins"));
+}
+
 LOGOS_TEST(installPlugin_failure_sets_error_no_event) {
     auto t = LogosTestContext("package_manager");
     t.mockCFunction("installPluginFile_result").returns("");
