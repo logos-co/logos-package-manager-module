@@ -27,6 +27,13 @@ enum class DependencyStatus {
     // rejects. Appended, never inserted — the real enum's numeric values are
     // ABI across libpackage_manager_lib.
     VersionMismatch,
+    // Installed, and provably NOT the package the dependant named: the key
+    // this install's signature verified against is not the `signer` DID on
+    // the edge. Identity, not trust — see the real header.
+    SignerMismatch,
+    // The edge pins a `signer` and nothing records who published what is
+    // installed. Absence of evidence, reported as its own status.
+    SignerUnknown,
 };
 
 struct SignatureVerificationResult {
@@ -84,6 +91,9 @@ struct InstalledPackage {
     // The subset of those entries that declared a range and/or a signer.
     // Empty for a package whose dependencies are all bare names.
     std::vector<PackageDependency> dependencyConstraints;
+    // The DID this install's signature was VERIFIED against; nullopt when
+    // nothing was recorded (embedded, pre-sidecar, unsigned, or unverified).
+    std::optional<std::string> observedSigner;
     Hashes hashes;
     InstallType installType = InstallType::User;
     std::string installDir;
@@ -100,6 +110,9 @@ struct DependencyTreeNode {
     // the dependency without one, and always absent on the root.
     std::optional<std::string> requiredVersion;
     std::optional<std::string> requiredSigner;
+    // Who actually published what is installed under this name. Travels next
+    // to requiredSigner so a report can name both sides.
+    std::optional<std::string> observedSigner;
     std::vector<DependencyTreeNode> children;
 
     // Matches the real lib — descendants-only BFS, name-deduped, children
@@ -122,6 +135,13 @@ struct DependentTreeNode {
 
 const char* installTypeToString(InstallType t);
 const char* dependencyStatusToString(DependencyStatus s);
+
+// Mirrors the real header: did this node resolve to a package that is on
+// disk? True for everything except NotInstalled and Cycle. It decides whether
+// `version` / `installType` carry meaning on a serialised node, and exists as
+// a predicate rather than an `||` chain because the chain silently omitted
+// each newly appended status.
+bool nodeResolvedToAnInstalledPackage(DependencyStatus s);
 
 class PackageManagerLib {
 public:

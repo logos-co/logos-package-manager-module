@@ -19,6 +19,7 @@
 #include <deque>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -243,15 +244,48 @@ std::optional<DependentTreeNode> PackageManagerLib::resolveDependents(const std:
 // exercise the same BFS-dedup behaviour without linking the real lib.
 // ---------------------------------------------------------------------------
 
+namespace {
+// Mirrors edgeVerdictSeverity in the real library. Higher = judged more
+// harshly by the edge that reached it; -1 for the statuses no edge decides.
+int mockEdgeVerdictSeverity(DependencyStatus s) {
+    switch (s) {
+        case DependencyStatus::Installed:       return 0;
+        case DependencyStatus::SignerUnknown:   return 1;
+        case DependencyStatus::VersionMismatch: return 2;
+        case DependencyStatus::SignerMismatch:  return 3;
+        case DependencyStatus::NotInstalled:
+        case DependencyStatus::Cycle:           return -1;
+    }
+    return -1;
+}
+} // namespace
+
 std::vector<DependencyTreeNode> DependencyTreeNode::flatten() const {
     std::vector<DependencyTreeNode> out;
-    std::unordered_set<std::string> seen;
+    std::unordered_map<std::string, std::size_t> indexByName;
     std::deque<const DependencyTreeNode*> queue;
     for (const auto& c : children) queue.push_back(&c);
     while (!queue.empty()) {
         const DependencyTreeNode* n = queue.front();
         queue.pop_front();
-        if (!seen.insert(n->name).second) continue;
+        auto [slot, inserted] = indexByName.emplace(n->name, out.size());
+        if (!inserted) {
+            // The real library PROMOTES here: one row per package, but a later
+            // edge that judged the package more harshly than the recorded one
+            // wins, carrying its own constraint. This mock used to dedup and
+            // stop, so a module test could see a satisfied row for a package
+            // the real resolver rejects — a test double that disagrees with
+            // the thing it doubles is worse than no double at all.
+            DependencyTreeNode& recorded = out[slot->second];
+            const int recordedRank  = mockEdgeVerdictSeverity(recorded.status);
+            const int candidateRank = mockEdgeVerdictSeverity(n->status);
+            if (recordedRank >= 0 && candidateRank > recordedRank) {
+                recorded.status          = n->status;
+                recorded.requiredVersion = n->requiredVersion;
+                recorded.requiredSigner  = n->requiredSigner;
+            }
+            continue;
+        }
         DependencyTreeNode copy;
         copy.name            = n->name;
         copy.status          = n->status;
@@ -259,6 +293,7 @@ std::vector<DependencyTreeNode> DependencyTreeNode::flatten() const {
         copy.installType     = n->installType;
         copy.requiredVersion = n->requiredVersion;
         copy.requiredSigner  = n->requiredSigner;
+        copy.observedSigner  = n->observedSigner;
         out.push_back(std::move(copy));
         for (const auto& c : n->children) queue.push_back(&c);
     }
@@ -336,6 +371,12 @@ const char* dependencyStatusToString(DependencyStatus s) {
         case DependencyStatus::NotInstalled:    return "not_installed";
         case DependencyStatus::Cycle:           return "cycle";
         case DependencyStatus::VersionMismatch: return "version_mismatch";
+        case DependencyStatus::SignerMismatch:  return "signer_mismatch";
+        case DependencyStatus::SignerUnknown:   return "signer_unknown";
     }
     return "not_installed";
+}
+
+bool nodeResolvedToAnInstalledPackage(DependencyStatus s) {
+    return s != DependencyStatus::NotInstalled && s != DependencyStatus::Cycle;
 }

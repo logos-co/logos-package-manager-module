@@ -1973,3 +1973,154 @@ LOGOS_TEST(resolveDependencies_absent_dependency_keeps_its_declared_range) {
     LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string(""));
     LOGOS_ASSERT_EQ(dep["requiredVersion"].get<std::string>(), std::string("^2.0.0"));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The observed signer, across the ABI
+//
+// Two facts have to reach the far side, and they are different facts:
+//   requiredSigner — a PIN this package's dependant declared. A demand.
+//   observedSigner — the DID whose signature over the installed package was
+//                    VERIFIED at install. An observation.
+// Everything downstream ("published by a different signer") needs both, and
+// carrying one without the other produces a message that names an accusation
+// with nobody to accuse.
+// ─────────────────────────────────────────────────────────────────────────────
+
+LOGOS_TEST(getInstalledPackages_carries_the_observed_signer) {
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage pkg;
+    pkg.name = "app";
+    pkg.version = "1.0.0";
+    pkg.observedSigner = "did:jwk:eyJrdHkiOiJPS1AifQ";
+    setMockInstalledPackages({pkg});
+
+    PackageManagerImpl impl;
+
+    LogosList list = impl.getInstalledPackages();
+    LOGOS_ASSERT_EQ(list.size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(list[0]["observedSigner"].get<std::string>(),
+                    std::string("did:jwk:eyJrdHkiOiJPS1AifQ"));
+}
+
+LOGOS_TEST(getInstalledPackages_omits_the_observed_signer_when_unrecorded) {
+    // Every package in the fleet today is this one: nothing recorded a
+    // publisher, so the key must be ABSENT rather than an empty string. A
+    // reader must be able to tell "nothing recorded" from a recorded value,
+    // and an empty string is neither — it would read as "observed to be
+    // unsigned", which nothing on disk records.
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage pkg;
+    pkg.name = "app";
+    setMockInstalledPackages({pkg});
+
+    PackageManagerImpl impl;
+
+    LogosList list = impl.getInstalledPackages();
+    LOGOS_ASSERT_FALSE(list[0].contains("observedSigner"));
+}
+
+// A dependency installed under the right name by the WRONG publisher.
+static DependencyTreeNode makeSignerMismatchTree() {
+    DependencyTreeNode root;
+    root.name = "app";
+    root.status = DependencyStatus::Installed;
+    DependencyTreeNode lib;
+    lib.name = "lib";
+    lib.status = DependencyStatus::SignerMismatch;
+    lib.version = "1.0.0";
+    lib.installType = InstallType::User;
+    lib.requiredSigner = "did:jwk:PINNED";
+    lib.observedSigner = "did:jwk:SOMEBODY_ELSE";
+    root.children = {lib};
+    return root;
+}
+
+LOGOS_TEST(resolveDependencies_surfaces_signer_mismatch_with_both_dids) {
+    auto t = LogosTestContext("package_manager");
+    setMockDependencyTree(makeSignerMismatchTree());
+
+    PackageManagerImpl impl;
+
+    LogosMap out = impl.resolveDependencies("app", true);
+    LogosMap dep = out["children"][0];
+    LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("signer_mismatch"));
+    LOGOS_ASSERT_EQ(dep["requiredSigner"].get<std::string>(), std::string("did:jwk:PINNED"));
+    LOGOS_ASSERT_EQ(dep["observedSigner"].get<std::string>(),
+                    std::string("did:jwk:SOMEBODY_ELSE"));
+    // A signer-mismatched package IS on disk. The `Installed || VersionMismatch`
+    // chain this replaced would have blanked both of these, so the far side
+    // would have shown a version-less row for a package sitting right there.
+    LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string("1.0.0"));
+    LOGOS_ASSERT_EQ(dep["installType"].get<std::string>(), std::string("user"));
+}
+
+LOGOS_TEST(resolveFlatDependencies_surfaces_signer_mismatch) {
+    // The flat projection is the ONLY one basecamp's load gate reads. A status
+    // that reached the tree and not this list would block nothing.
+    auto t = LogosTestContext("package_manager");
+    setMockDependencyTree(makeSignerMismatchTree());
+
+    PackageManagerImpl impl;
+
+    LogosList flat = impl.resolveFlatDependencies("app", true);
+    LOGOS_ASSERT_EQ(flat.size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(flat[0]["status"].get<std::string>(), std::string("signer_mismatch"));
+    LOGOS_ASSERT_EQ(flat[0]["requiredSigner"].get<std::string>(), std::string("did:jwk:PINNED"));
+    LOGOS_ASSERT_EQ(flat[0]["observedSigner"].get<std::string>(),
+                    std::string("did:jwk:SOMEBODY_ELSE"));
+    LOGOS_ASSERT_EQ(flat[0]["version"].get<std::string>(), std::string("1.0.0"));
+}
+
+LOGOS_TEST(resolveDependencies_surfaces_signer_unknown_without_an_observed_did) {
+    // Absence of evidence crosses the ABI as its own status, with no
+    // observedSigner key — so the far side can say "nobody recorded who
+    // published this" rather than naming a publisher it does not have.
+    auto t = LogosTestContext("package_manager");
+    DependencyTreeNode root;
+    root.name = "app";
+    root.status = DependencyStatus::Installed;
+    DependencyTreeNode lib;
+    lib.name = "lib";
+    lib.status = DependencyStatus::SignerUnknown;
+    lib.version = "1.0.0";
+    lib.installType = InstallType::Embedded;
+    lib.requiredSigner = "did:jwk:PINNED";
+    root.children = {lib};
+    setMockDependencyTree(root);
+
+    PackageManagerImpl impl;
+
+    LogosMap dep = impl.resolveDependencies("app", true)["children"][0];
+    LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("signer_unknown"));
+    LOGOS_ASSERT_EQ(dep["requiredSigner"].get<std::string>(), std::string("did:jwk:PINNED"));
+    LOGOS_ASSERT_FALSE(dep.contains("observedSigner"));
+    // Still on disk — and an embedded package is the population that can NEVER
+    // acquire a recorded publisher, because it never passes through install.
+    LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string("1.0.0"));
+    LOGOS_ASSERT_EQ(dep["installType"].get<std::string>(), std::string("embedded"));
+}
+
+LOGOS_TEST(resolveDependencies_omits_observed_signer_for_an_absent_dependency) {
+    // NotInstalled blanks version/installType, and there is no publisher to
+    // report for a package that is not there.
+    auto t = LogosTestContext("package_manager");
+    DependencyTreeNode root;
+    root.name = "app";
+    root.status = DependencyStatus::Installed;
+    DependencyTreeNode absent;
+    absent.name = "lib";
+    absent.status = DependencyStatus::NotInstalled;
+    absent.requiredSigner = "did:jwk:PINNED";
+    root.children = {absent};
+    setMockDependencyTree(root);
+
+    PackageManagerImpl impl;
+
+    LogosMap dep = impl.resolveDependencies("app", true)["children"][0];
+    LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("not_installed"));
+    LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string(""));
+    LOGOS_ASSERT_FALSE(dep.contains("observedSigner"));
+    // The pin still rides along, so a caller can say which publisher to get it
+    // from — the same courtesy requiredVersion gets on an absent row.
+    LOGOS_ASSERT_EQ(dep["requiredSigner"].get<std::string>(), std::string("did:jwk:PINNED"));
+}

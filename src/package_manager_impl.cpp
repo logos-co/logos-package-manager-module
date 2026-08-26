@@ -68,7 +68,9 @@ LogosMap toLogosMap(const InstalledPackage& p)
     // reader that does not know the key sees exactly the payload it saw
     // before. Mirrors package_manager_json.cpp's `dependencyConstraints`.
     //
-    // Nothing here evaluates the signer — see PackageManagerLib. It is data.
+    // These are the pins this package declares about OTHERS. What THIS package
+    // is — who published it — travels in `observedSigner` below, and the two
+    // must not be confused: a pin is a demand, an observation is a fact.
     if (!p.dependencyConstraints.empty()) {
         LogosList constraints = LogosList::array();
         for (const auto& d : p.dependencyConstraints) {
@@ -80,6 +82,16 @@ LogosMap toLogosMap(const InstalledPackage& p)
         }
         m["dependencyConstraints"] = constraints;
     }
+
+    // WHO PUBLISHED THIS COPY — the DID whose signature over this package was
+    // VERIFIED at install time, read back from the `signer` sidecar. Additive
+    // and emitted only when something was actually observed, so an unsigned,
+    // embedded or pre-sidecar install crosses the ABI byte-identically to
+    // before, and a reader can tell "nothing recorded" (key absent) from a
+    // recorded value. A key present with an empty string would be neither, and
+    // could be misread as "observed to be unsigned" — which nothing on disk
+    // records.
+    if (p.observedSigner) m["observedSigner"] = *p.observedSigner;
 
     m["hashes"]       = toLogosMap(p.hashes);
     m["installType"]  = std::string(installTypeToString(p.installType));
@@ -104,10 +116,17 @@ LogosMap toFlatLogosMap(const DependencyTreeNode& n)
     LogosMap m = LogosMap::object();
     m["name"]   = n.name;
     m["status"] = std::string(dependencyStatusToString(n.status));
-    // VersionMismatch resolved to a package that IS installed, so it carries
-    // the same fields Installed does. The version actually present is half the
-    // report — "needs ^2.0.0, have 1.0.0" is only actionable with both numbers.
-    if (n.status == DependencyStatus::Installed || n.status == DependencyStatus::VersionMismatch) {
+    // Every status except NotInstalled and Cycle resolved to a package that IS
+    // installed, so it carries the same fields Installed does. The version
+    // actually present is half the report — "needs ^2.0.0, have 1.0.0" is only
+    // actionable with both numbers, and so is "pinned to X, published by Y".
+    //
+    // Asked as a predicate, not as `Installed || VersionMismatch`: that chain
+    // named the two statuses that existed when it was written, so the moment
+    // SignerMismatch and SignerUnknown were appended it would have started
+    // blanking the version on installed packages, in this file and in
+    // package_manager_json.cpp, with nothing to notice it.
+    if (nodeResolvedToAnInstalledPackage(n.status)) {
         m["version"]     = n.version;
         m["installType"] = std::string(installTypeToString(n.installType));
     } else {
@@ -116,10 +135,14 @@ LogosMap toFlatLogosMap(const DependencyTreeNode& n)
     }
     // The constraint the parent edge declared. Additive and absent for an
     // unconstrained edge, so a tree of bare-name dependencies crosses the ABI
-    // byte-identically to before. `requiredVersion` is what `status` was
-    // judged against; `requiredSigner` is carried and compared by nobody.
+    // byte-identically to before. BOTH are judged: `requiredVersion` against
+    // `version`, `requiredSigner` against `observedSigner`.
     if (n.requiredVersion) m["requiredVersion"] = *n.requiredVersion;
     if (n.requiredSigner)  m["requiredSigner"]  = *n.requiredSigner;
+    // The other half of a signer report — who actually published what is
+    // installed. Absent when nothing recorded a publisher, which is what makes
+    // a `signer_unknown` row legible on the far side without a second call.
+    if (n.observedSigner)  m["observedSigner"]  = *n.observedSigner;
     return m;
 }
 
