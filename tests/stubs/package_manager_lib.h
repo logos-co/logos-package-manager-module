@@ -23,6 +23,10 @@ enum class DependencyStatus {
     Installed,
     NotInstalled,
     Cycle,
+    // Installed, but at a version the depending manifest's semver range
+    // rejects. Appended, never inserted — the real enum's numeric values are
+    // ABI across libpackage_manager_lib.
+    VersionMismatch,
 };
 
 struct SignatureVerificationResult {
@@ -48,6 +52,21 @@ struct Hashes {
     std::string root;
 };
 
+// Mirrors PackageDependency in package_manager_lib.h — one `dependencies[]`
+// entry, either a plain name or an object carrying a semver range and/or a
+// publisher DID.
+struct PackageDependency {
+    std::string name;
+    std::optional<std::string> version;
+    std::optional<std::string> signer;
+
+    PackageDependency() = default;
+    PackageDependency(std::string n) : name(std::move(n)) {}   // NOLINT: intended implicit
+    PackageDependency(const char* n) : name(n) {}              // NOLINT: intended implicit
+
+    bool isSimple() const { return !version.has_value() && !signer.has_value(); }
+};
+
 // Mirrors InstalledPackage in package_manager_lib.h.
 struct InstalledPackage {
     std::string name;
@@ -62,6 +81,9 @@ struct InstalledPackage {
     std::string view;
     std::string manifestVersion;
     std::vector<std::string> dependencies;
+    // The subset of those entries that declared a range and/or a signer.
+    // Empty for a package whose dependencies are all bare names.
+    std::vector<PackageDependency> dependencyConstraints;
     Hashes hashes;
     InstallType installType = InstallType::User;
     std::string installDir;
@@ -74,6 +96,10 @@ struct DependencyTreeNode {
     DependencyStatus status = DependencyStatus::NotInstalled;
     std::string version;
     InstallType installType = InstallType::User;
+    // The constraint the PARENT declared on this edge; absent when it named
+    // the dependency without one, and always absent on the root.
+    std::optional<std::string> requiredVersion;
+    std::optional<std::string> requiredSigner;
     std::vector<DependencyTreeNode> children;
 
     // Matches the real lib — descendants-only BFS, name-deduped, children

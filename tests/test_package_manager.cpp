@@ -1795,3 +1795,181 @@ LOGOS_TEST(ackPendingAction_rejects_name_not_in_multi_uninstall_batch) {
 
     impl.resetPendingAction();
 }
+
+// ---------------------------------------------------------------------------
+// Dependency CONSTRAINTS across the module ABI.
+//
+// This serialiser is where the range and the signer used to die. lgpm carried
+// {name, version, signer} intact all the way from metadata.json through the
+// .lgx and onto disk; two readers over the SAME installed tree then disagreed:
+//
+//   lgpm --json info app                 -> dependencyConstraints:[{...}]
+//   package_manager.getInstalledPackages -> dependencies:["lib"]
+//
+// Same library, same files, one serialiser — this one. Everything past it,
+// basecamp included, was reading a payload the constraint had been stripped
+// from. These tests pin both halves: the constraint crosses, and an
+// unconstrained package crosses byte-identically to before.
+// ---------------------------------------------------------------------------
+
+LOGOS_TEST(getInstalledPackages_carries_dependency_constraints) {
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage pkg;
+    pkg.name = "app";
+    pkg.version = "1.0.0";
+    pkg.dependencies = {"plain", "lib"};
+    PackageDependency constrained;
+    constrained.name = "lib";
+    constrained.version = "^2.0.0";
+    constrained.signer = "did:jwk:eyJrdHkiOiJPS1AifQ";
+    pkg.dependencyConstraints = {constrained};
+    setMockInstalledPackages({pkg});
+
+    PackageManagerImpl impl;
+
+    LogosList list = impl.getInstalledPackages();
+    LOGOS_ASSERT_EQ(list.size(), static_cast<size_t>(1));
+
+    // The edge set is unchanged: still an array of plain name STRINGS, both
+    // entries present, in declared order. Widening this array instead of
+    // adding a key would have broken every consumer that indexes it as text.
+    LOGOS_ASSERT_EQ(list[0]["dependencies"].size(), static_cast<size_t>(2));
+    LOGOS_ASSERT_EQ(list[0]["dependencies"][0].get<std::string>(), std::string("plain"));
+    LOGOS_ASSERT_EQ(list[0]["dependencies"][1].get<std::string>(), std::string("lib"));
+
+    // The constraint now arrives alongside it.
+    LOGOS_ASSERT_TRUE(list[0].contains("dependencyConstraints"));
+    LOGOS_ASSERT_EQ(list[0]["dependencyConstraints"].size(), static_cast<size_t>(1));
+    LogosMap c = list[0]["dependencyConstraints"][0];
+    LOGOS_ASSERT_EQ(c["name"].get<std::string>(), std::string("lib"));
+    LOGOS_ASSERT_EQ(c["version"].get<std::string>(), std::string("^2.0.0"));
+    LOGOS_ASSERT_EQ(c["signer"].get<std::string>(), std::string("did:jwk:eyJrdHkiOiJPS1AifQ"));
+}
+
+LOGOS_TEST(getInstalledPackages_omits_constraints_for_bare_names) {
+    // Every package in the fleet today is this one. The new key must be
+    // ABSENT, not an empty array — a reader that does not know it sees the
+    // payload it has always seen.
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage pkg;
+    pkg.name = "app";
+    pkg.dependencies = {"lib"};
+    setMockInstalledPackages({pkg});
+
+    PackageManagerImpl impl;
+
+    LogosList list = impl.getInstalledPackages();
+    LOGOS_ASSERT_EQ(list.size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(list[0]["dependencies"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_FALSE(list[0].contains("dependencyConstraints"));
+}
+
+LOGOS_TEST(getInstalledPackages_carries_a_range_only_constraint) {
+    // `signer` is optional independently of `version`; a range-only entry must
+    // not grow an empty signer key.
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage pkg;
+    pkg.name = "app";
+    pkg.dependencies = {"lib"};
+    PackageDependency constrained;
+    constrained.name = "lib";
+    constrained.version = "^2.0.0";
+    pkg.dependencyConstraints = {constrained};
+    setMockInstalledPackages({pkg});
+
+    PackageManagerImpl impl;
+
+    LogosList list = impl.getInstalledPackages();
+    LogosMap c = list[0]["dependencyConstraints"][0];
+    LOGOS_ASSERT_EQ(c["version"].get<std::string>(), std::string("^2.0.0"));
+    LOGOS_ASSERT_FALSE(c.contains("signer"));
+}
+
+// Forward tree whose single child is installed at a version its parent's
+// range rejects: "lib" is 1.0.0, the edge asked for ^2.0.0.
+static DependencyTreeNode makeVersionMismatchTree() {
+    DependencyTreeNode root;
+    root.name = "app";
+    root.status = DependencyStatus::Installed;
+    DependencyTreeNode lib;
+    lib.name = "lib";
+    lib.status = DependencyStatus::VersionMismatch;
+    lib.version = "1.0.0";
+    lib.installType = InstallType::User;
+    lib.requiredVersion = "^2.0.0";
+    lib.requiredSigner = "did:jwk:eyJrdHkiOiJPS1AifQ";
+    root.children = {lib};
+    return root;
+}
+
+LOGOS_TEST(resolveDependencies_surfaces_version_mismatch) {
+    auto t = LogosTestContext("package_manager");
+    setMockDependencyTree(makeVersionMismatchTree());
+
+    PackageManagerImpl impl;
+
+    LogosMap out = impl.resolveDependencies("app", true);
+    LogosMap dep = out["children"][0];
+    LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("version_mismatch"));
+    // Installed, so it keeps the fields an installed node has — not_installed
+    // and cycle blank them, and blanking these would hide the version that
+    // makes the mismatch actionable.
+    LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string("1.0.0"));
+    LOGOS_ASSERT_EQ(dep["installType"].get<std::string>(), std::string("user"));
+    LOGOS_ASSERT_EQ(dep["requiredVersion"].get<std::string>(), std::string("^2.0.0"));
+    LOGOS_ASSERT_EQ(dep["requiredSigner"].get<std::string>(),
+                    std::string("did:jwk:eyJrdHkiOiJPS1AifQ"));
+}
+
+LOGOS_TEST(resolveFlatDependencies_surfaces_version_mismatch) {
+    // The flat projection is what a list-shaped consumer reads; a status that
+    // only existed on the tree would never reach it.
+    auto t = LogosTestContext("package_manager");
+    setMockDependencyTree(makeVersionMismatchTree());
+
+    PackageManagerImpl impl;
+
+    LogosList flat = impl.resolveFlatDependencies("app", true);
+    LOGOS_ASSERT_EQ(flat.size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(flat[0]["name"].get<std::string>(), std::string("lib"));
+    LOGOS_ASSERT_EQ(flat[0]["status"].get<std::string>(), std::string("version_mismatch"));
+    LOGOS_ASSERT_EQ(flat[0]["requiredVersion"].get<std::string>(), std::string("^2.0.0"));
+}
+
+LOGOS_TEST(resolveDependencies_omits_constraint_keys_when_unconstrained) {
+    // The backward-compatibility half for the tree wire format.
+    auto t = LogosTestContext("package_manager");
+    setMockDependencyTree(makeForwardTree());
+
+    PackageManagerImpl impl;
+
+    LogosMap out = impl.resolveDependencies("root", true);
+    LogosMap dep = out["children"][0];
+    LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("installed"));
+    LOGOS_ASSERT_FALSE(dep.contains("requiredVersion"));
+    LOGOS_ASSERT_FALSE(dep.contains("requiredSigner"));
+}
+
+LOGOS_TEST(resolveDependencies_absent_dependency_keeps_its_declared_range) {
+    // ABSENCE OUTRANKS MISMATCH — the library decides that, but the ABI has to
+    // carry the evidence: a not_installed node still reports the range, so a
+    // caller can say WHICH version to go and install.
+    auto t = LogosTestContext("package_manager");
+    DependencyTreeNode root;
+    root.name = "app";
+    root.status = DependencyStatus::Installed;
+    DependencyTreeNode absent;
+    absent.name = "lib";
+    absent.status = DependencyStatus::NotInstalled;
+    absent.requiredVersion = "^2.0.0";
+    root.children = {absent};
+    setMockDependencyTree(root);
+
+    PackageManagerImpl impl;
+
+    LogosMap out = impl.resolveDependencies("app", true);
+    LogosMap dep = out["children"][0];
+    LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("not_installed"));
+    LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string(""));
+    LOGOS_ASSERT_EQ(dep["requiredVersion"].get<std::string>(), std::string("^2.0.0"));
+}

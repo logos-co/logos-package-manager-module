@@ -253,10 +253,12 @@ std::vector<DependencyTreeNode> DependencyTreeNode::flatten() const {
         queue.pop_front();
         if (!seen.insert(n->name).second) continue;
         DependencyTreeNode copy;
-        copy.name        = n->name;
-        copy.status      = n->status;
-        copy.version     = n->version;
-        copy.installType = n->installType;
+        copy.name            = n->name;
+        copy.status          = n->status;
+        copy.version         = n->version;
+        copy.installType     = n->installType;
+        copy.requiredVersion = n->requiredVersion;
+        copy.requiredSigner  = n->requiredSigner;
         out.push_back(std::move(copy));
         for (const auto& c : n->children) queue.push_back(&c);
     }
@@ -330,9 +332,10 @@ const char* installTypeToString(InstallType t) {
 
 const char* dependencyStatusToString(DependencyStatus s) {
     switch (s) {
-        case DependencyStatus::Installed:    return "installed";
-        case DependencyStatus::NotInstalled: return "not_installed";
-        case DependencyStatus::Cycle:        return "cycle";
+        case DependencyStatus::Installed:       return "installed";
+        case DependencyStatus::NotInstalled:    return "not_installed";
+        case DependencyStatus::Cycle:           return "cycle";
+        case DependencyStatus::VersionMismatch: return "version_mismatch";
     }
     return "not_installed";
 }

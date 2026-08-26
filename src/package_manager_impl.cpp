@@ -49,6 +49,38 @@ LogosMap toLogosMap(const InstalledPackage& p)
     for (const auto& d : p.dependencies) deps.push_back(d);
     m["dependencies"] = deps;
 
+    // The range and the signer, carried across the module ABI as a SEPARATE
+    // key rather than by widening `dependencies`.
+    //
+    // `dependencies` stays an array of plain name STRINGS because that is what
+    // every consumer on the far side already parses, and widening it in place
+    // would fail SILENTLY rather than loudly. basecamp's
+    // PluginLoader::loadCoreDependencies reads this very list (via
+    // UIPluginManager's `m_uiPluginMetadata`, filled from getInstalledUiPlugins)
+    // and does `QString depName = dep.toString(); if (depName.isEmpty())
+    // continue;` — a QVariantMap stringifies to empty, so an object-form entry
+    // would be skipped and the dependency simply never loaded, with no
+    // diagnostic. The graph edge and the constraint on that edge are different
+    // facts, so they travel in different keys.
+    //
+    // Absent whenever every entry is a bare name, which is every package in
+    // the fleet today: this is backward-compatible by construction, and a
+    // reader that does not know the key sees exactly the payload it saw
+    // before. Mirrors package_manager_json.cpp's `dependencyConstraints`.
+    //
+    // Nothing here evaluates the signer — see PackageManagerLib. It is data.
+    if (!p.dependencyConstraints.empty()) {
+        LogosList constraints = LogosList::array();
+        for (const auto& d : p.dependencyConstraints) {
+            LogosMap c = LogosMap::object();
+            c["name"] = d.name;
+            if (d.version) c["version"] = *d.version;
+            if (d.signer)  c["signer"]  = *d.signer;
+            constraints.push_back(c);
+        }
+        m["dependencyConstraints"] = constraints;
+    }
+
     m["hashes"]       = toLogosMap(p.hashes);
     m["installType"]  = std::string(installTypeToString(p.installType));
     m["installDir"]   = p.installDir;
@@ -72,13 +104,22 @@ LogosMap toFlatLogosMap(const DependencyTreeNode& n)
     LogosMap m = LogosMap::object();
     m["name"]   = n.name;
     m["status"] = std::string(dependencyStatusToString(n.status));
-    if (n.status == DependencyStatus::Installed) {
+    // VersionMismatch resolved to a package that IS installed, so it carries
+    // the same fields Installed does. The version actually present is half the
+    // report — "needs ^2.0.0, have 1.0.0" is only actionable with both numbers.
+    if (n.status == DependencyStatus::Installed || n.status == DependencyStatus::VersionMismatch) {
         m["version"]     = n.version;
         m["installType"] = std::string(installTypeToString(n.installType));
     } else {
         m["version"]     = "";
         m["installType"] = "";
     }
+    // The constraint the parent edge declared. Additive and absent for an
+    // unconstrained edge, so a tree of bare-name dependencies crosses the ABI
+    // byte-identically to before. `requiredVersion` is what `status` was
+    // judged against; `requiredSigner` is carried and compared by nobody.
+    if (n.requiredVersion) m["requiredVersion"] = *n.requiredVersion;
+    if (n.requiredSigner)  m["requiredSigner"]  = *n.requiredSigner;
     return m;
 }
 
