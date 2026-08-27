@@ -293,7 +293,7 @@ std::vector<DependencyTreeNode> DependencyTreeNode::flatten() const {
         copy.installType     = n->installType;
         copy.requiredVersion = n->requiredVersion;
         copy.requiredSigner  = n->requiredSigner;
-        copy.observedSigner  = n->observedSigner;
+        copy.signerDid  = n->signerDid;
         out.push_back(std::move(copy));
         for (const auto& c : n->children) queue.push_back(&c);
     }

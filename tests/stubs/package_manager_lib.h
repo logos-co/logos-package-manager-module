@@ -91,9 +91,10 @@ struct InstalledPackage {
     // The subset of those entries that declared a range and/or a signer.
     // Empty for a package whose dependencies are all bare names.
     std::vector<PackageDependency> dependencyConstraints;
-    // The DID this install's signature was VERIFIED against; nullopt when
-    // nothing was recorded (embedded, pre-sidecar, unsigned, or unverified).
-    std::optional<std::string> observedSigner;
+    // The DID the installed manifest.sig names, once checked against the key
+    // that DID itself carries; nullopt when no usable signature is installed
+    // (embedded, unsigned, or a signature that does not verify).
+    std::optional<std::string> signerDid;
     Hashes hashes;
     InstallType installType = InstallType::User;
     std::string installDir;
@@ -110,9 +111,10 @@ struct DependencyTreeNode {
     // the dependency without one, and always absent on the root.
     std::optional<std::string> requiredVersion;
     std::optional<std::string> requiredSigner;
-    // Who actually published what is installed under this name. Travels next
-    // to requiredSigner so a report can name both sides.
-    std::optional<std::string> observedSigner;
+    // What the installed package's own signature says about itself. Travels
+    // next to requiredSigner so a report can name both sides; the verdict
+    // comes from verifying, not from comparing these two.
+    std::optional<std::string> signerDid;
     std::vector<DependencyTreeNode> children;
 
     // Matches the real lib — descendants-only BFS, name-deduped, children

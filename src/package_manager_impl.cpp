@@ -69,8 +69,9 @@ LogosMap toLogosMap(const InstalledPackage& p)
     // before. Mirrors package_manager_json.cpp's `dependencyConstraints`.
     //
     // These are the pins this package declares about OTHERS. What THIS package
-    // is — who published it — travels in `observedSigner` below, and the two
-    // must not be confused: a pin is a demand, an observation is a fact.
+    // says about ITSELF travels in `signerDid` below, and the two must not be
+    // confused: a pin is a demand made of somebody else, `signerDid` is a
+    // claim this package makes and can back with a signature.
     if (!p.dependencyConstraints.empty()) {
         LogosList constraints = LogosList::array();
         for (const auto& d : p.dependencyConstraints) {
@@ -83,15 +84,30 @@ LogosMap toLogosMap(const InstalledPackage& p)
         m["dependencyConstraints"] = constraints;
     }
 
-    // WHO PUBLISHED THIS COPY — the DID whose signature over this package was
-    // VERIFIED at install time, read back from the `signer` sidecar. Additive
-    // and emitted only when something was actually observed, so an unsigned,
-    // embedded or pre-sidecar install crosses the ABI byte-identically to
-    // before, and a reader can tell "nothing recorded" (key absent) from a
-    // recorded value. A key present with an empty string would be neither, and
-    // could be misread as "observed to be unsigned" — which nothing on disk
-    // records.
-    if (p.observedSigner) m["observedSigner"] = *p.observedSigner;
+    // WHO SIGNED THIS COPY — the DID named by the installed manifest.sig,
+    // reported only once that signature has been checked against the key the
+    // DID itself carries. So: somebody holding this key really signed this
+    // manifest. It does NOT establish which identity is correct — a did:jwk
+    // supplies both the claim and the key that checks it, so a document always
+    // agrees with itself. Settling identity needs an outside reference, and
+    // the one that does it is `requiredSigner` on a dependency edge, which is
+    // answered by VERIFYING rather than by comparing against this value.
+    //
+    // Additive and emitted only when a usable signature is installed, so an
+    // unsigned or embedded package crosses the ABI byte-identically to before,
+    // and a reader can tell "no signature" (key absent) from a signed one.
+    // A key present with an empty string would be neither.
+    //
+    // The same key name as the `signerDid` in the installPluginFile,
+    // inspectPackage and verifySignature responses, deliberately: all four
+    // name the DID a package's own manifest.sig carries. The GUARANTEE differs
+    // by message and each states its own. Those three come straight from
+    // lgx_verify_signature, which fills signer_did BEFORE running the check,
+    // so they can carry an unverified claim and always travel with a
+    // `signatureStatus` / `signatureValid` key that says which. This one has
+    // no such companion because it does not need one: it is absent unless the
+    // signature verified.
+    if (p.signerDid) m["signerDid"] = *p.signerDid;
 
     m["hashes"]       = toLogosMap(p.hashes);
     m["installType"]  = std::string(installTypeToString(p.installType));
@@ -136,13 +152,17 @@ LogosMap toFlatLogosMap(const DependencyTreeNode& n)
     // The constraint the parent edge declared. Additive and absent for an
     // unconstrained edge, so a tree of bare-name dependencies crosses the ABI
     // byte-identically to before. BOTH are judged: `requiredVersion` against
-    // `version`, `requiredSigner` against `observedSigner`.
+    // `version`, and `requiredSigner` by verifying the installed signature
+    // under the PIN's own key.
     if (n.requiredVersion) m["requiredVersion"] = *n.requiredVersion;
     if (n.requiredSigner)  m["requiredSigner"]  = *n.requiredSigner;
-    // The other half of a signer report — who actually published what is
-    // installed. Absent when nothing recorded a publisher, which is what makes
-    // a `signer_unknown` row legible on the far side without a second call.
-    if (n.observedSigner)  m["observedSigner"]  = *n.observedSigner;
+    // The other half of a signer report — what the installed package's own
+    // signature says about itself. Absent when no usable signature is
+    // installed, which is what makes a `signer_unknown` row legible on the far
+    // side without a second call. NOT the value `status` was derived from: a
+    // `signer_mismatch` row carries a signerDid, and the two differing is the
+    // normal shape of that row rather than an inconsistency.
+    if (n.signerDid)  m["signerDid"]  = *n.signerDid;
     return m;
 }
 
