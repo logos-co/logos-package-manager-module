@@ -23,6 +23,16 @@ enum class DependencyStatus {
     Installed,
     NotInstalled,
     Cycle,
+    // Installed at a version the depending manifest's semver range rejects.
+    // Appended, never inserted — the real enum's numeric values are ABI across
+    // libpackage_manager_lib.
+    VersionMismatch,
+    // Installed, but its manifest.sig does not verify under the key the edge's
+    // `signer` DID carries. Identity, not trust — see the real header.
+    SignerMismatch,
+    // The edge pins a `signer` and no usable signature is installed to check
+    // it against. Absence of evidence, as its own status.
+    SignerUnknown,
 };
 
 struct SignatureVerificationResult {
@@ -48,6 +58,20 @@ struct Hashes {
     std::string root;
 };
 
+// Mirrors PackageDependency in package_manager_lib.h — one `dependencies[]`
+// entry: a plain name, or an object carrying a semver range and/or signer DID.
+struct PackageDependency {
+    std::string name;
+    std::optional<std::string> version;
+    std::optional<std::string> signer;
+
+    PackageDependency() = default;
+    PackageDependency(std::string n) : name(std::move(n)) {}   // NOLINT: intended implicit
+    PackageDependency(const char* n) : name(n) {}              // NOLINT: intended implicit
+
+    bool isSimple() const { return !version.has_value() && !signer.has_value(); }
+};
+
 // Mirrors InstalledPackage in package_manager_lib.h.
 struct InstalledPackage {
     std::string name;
@@ -62,6 +86,13 @@ struct InstalledPackage {
     std::string view;
     std::string manifestVersion;
     std::vector<std::string> dependencies;
+    // The subset of those entries declaring a range and/or a signer; empty
+    // when every dependency is a bare name.
+    std::vector<PackageDependency> dependencyConstraints;
+    // The DID the installed manifest.sig names, once verified under the key
+    // that DID carries; nullopt when no usable signature is installed
+    // (embedded, unsigned, or a signature that does not verify).
+    std::optional<std::string> signerDid;
     Hashes hashes;
     InstallType installType = InstallType::User;
     std::string installDir;
@@ -74,6 +105,13 @@ struct DependencyTreeNode {
     DependencyStatus status = DependencyStatus::NotInstalled;
     std::string version;
     InstallType installType = InstallType::User;
+    // The constraint the PARENT declared on this edge; absent when it named
+    // the dependency without one, and always absent on the root.
+    std::optional<std::string> requiredVersion;
+    std::optional<std::string> requiredSigner;
+    // What the installed package's own signature says about itself; the
+    // verdict comes from verifying, not from comparing it to requiredSigner.
+    std::optional<std::string> signerDid;
     std::vector<DependencyTreeNode> children;
 
     // Matches the real lib — descendants-only BFS, name-deduped, children
@@ -96,6 +134,11 @@ struct DependentTreeNode {
 
 const char* installTypeToString(InstallType t);
 const char* dependencyStatusToString(DependencyStatus s);
+
+// Mirrors the real header: true for everything except NotInstalled and Cycle.
+// Decides whether `version` / `installType` carry meaning on a serialised node.
+// A predicate rather than an `||` chain, which silently omits each new status.
+bool nodeResolvedToAnInstalledPackage(DependencyStatus s);
 
 class PackageManagerLib {
 public:

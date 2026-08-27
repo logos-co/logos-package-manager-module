@@ -49,6 +49,37 @@ LogosMap toLogosMap(const InstalledPackage& p)
     for (const auto& d : p.dependencies) deps.push_back(d);
     m["dependencies"] = deps;
 
+    // A SEPARATE key rather than a widened `dependencies`, which stays an
+    // array of plain name STRINGS: basecamp's PluginLoader reads that list as
+    // `dep.toString()` and skips empties, so an object-form entry would
+    // stringify to empty and the dependency would silently never load. Absent
+    // when every entry is a bare name, so an unconstrained package crosses
+    // byte-identically. Mirrors package_manager_json.cpp's
+    // `dependencyConstraints`. These are pins on OTHERS; `signerDid` below is
+    // what this package claims about itself.
+    if (!p.dependencyConstraints.empty()) {
+        LogosList constraints = LogosList::array();
+        for (const auto& d : p.dependencyConstraints) {
+            LogosMap c = LogosMap::object();
+            c["name"] = d.name;
+            if (d.version) c["version"] = *d.version;
+            if (d.signer)  c["signer"]  = *d.signer;
+            constraints.push_back(c);
+        }
+        m["dependencyConstraints"] = constraints;
+    }
+
+    // The DID the installed manifest.sig names, emitted only once that
+    // signature verified under the key the DID itself carries. That is
+    // self-consistency, not identity; only `requiredSigner` settles identity.
+    // Absent when no usable signature is installed, so an unsigned or embedded
+    // package crosses byte-identically; an empty string would be ambiguous.
+    // Deliberately the same key name as in the installPluginFile /
+    // inspectPackage / verifySignature responses, but those come from
+    // lgx_verify_signature, which fills signer_did BEFORE checking, so they
+    // need a companion signatureStatus key and this one does not.
+    if (p.signerDid) m["signerDid"] = *p.signerDid;
+
     m["hashes"]       = toLogosMap(p.hashes);
     m["installType"]  = std::string(installTypeToString(p.installType));
     m["installDir"]   = p.installDir;
@@ -72,13 +103,29 @@ LogosMap toFlatLogosMap(const DependencyTreeNode& n)
     LogosMap m = LogosMap::object();
     m["name"]   = n.name;
     m["status"] = std::string(dependencyStatusToString(n.status));
-    if (n.status == DependencyStatus::Installed) {
+    // Every status except NotInstalled and Cycle resolved to a package that IS
+    // installed, so it carries the fields Installed does — "needs ^2.0.0, have
+    // 1.0.0" is only actionable with both numbers. A predicate, not an
+    // `Installed || VersionMismatch` chain: such a chain silently starts
+    // blanking the version on each status appended after it was written.
+    if (nodeResolvedToAnInstalledPackage(n.status)) {
         m["version"]     = n.version;
         m["installType"] = std::string(installTypeToString(n.installType));
     } else {
         m["version"]     = "";
         m["installType"] = "";
     }
+    // The constraint the parent edge declared; absent for an unconstrained
+    // edge, so a bare-name tree crosses byte-identically to before.
+    // `requiredSigner` is judged by verifying the installed signature under the
+    // PIN's own key, not by comparing it to `signerDid`.
+    if (n.requiredVersion) m["requiredVersion"] = *n.requiredVersion;
+    if (n.requiredSigner)  m["requiredSigner"]  = *n.requiredSigner;
+    // What the installed package's own signature says about itself; absent
+    // when none is installed, which is what makes a `signer_unknown` row
+    // legible without a second call. A `signer_mismatch` row carries both, and
+    // the two differing is the normal shape of that row.
+    if (n.signerDid)  m["signerDid"]  = *n.signerDid;
     return m;
 }
 
