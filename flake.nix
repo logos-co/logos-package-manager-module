@@ -3,23 +3,11 @@
 
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder";
-    # PINNED TO A BRANCH, DELIBERATELY, AND TEMPORARILY.
-    #
-    # `master` here is a logos-package-manager whose DependencyTreeNode has
-    # neither `requiredSigner` nor `signerDid`, so src/package_manager_impl.cpp
-    # does not COMPILE against it. CI runs `nix build -L` — the real module,
-    # linking the real library — so leaving this on master is not a latent
-    # problem, it is a red build.
-    #
-    # And the check would not have told anyone: `tests.mockCLibs = ["logos_pm"]`
-    # builds the unit tests against tests/stubs/package_manager_lib.h, which is
-    # a hand-maintained MIRROR of the real header. It compiles, and passes,
-    # against a library it never links. The stub moving with this header is the
-    # only thing that keeps the two honest.
-    #
-    # REVERT TO "github:logos-co/logos-package-manager" WHEN
-    # fix/flatten-must-not-mask-a-deeper-mismatch MERGES.
-    logos-package-manager.url = "github:logos-co/logos-package-manager/fix/flatten-must-not-mask-a-deeper-mismatch";
+    # `tests.mockCLibs = ["logos_pm"]` builds the unit tests against
+    # tests/stubs/package_manager_lib.h, a hand-maintained mirror. That check
+    # passes against a library it never links, so it cannot detect a mismatch
+    # with the real one — `nix build` is what catches that.
+    logos-package-manager.url = "github:logos-co/logos-package-manager";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
