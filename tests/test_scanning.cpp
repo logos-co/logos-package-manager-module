@@ -147,19 +147,18 @@ LOGOS_TEST(scanned_modules_contain_manifest_fields) {
 }
 
 // =============================================================================
-// Dependency constraints, end to end through the REAL PackageManagerLib.
+// Dependency constraints, end to end through the REAL PackageManagerLib
 //
-// The unit tests in test_package_manager.cpp mock the library, so they pin the
-// serialiser but not the evaluation. These run against the real scanner and the
-// real semver engine over a real on-disk manifest, which is the only place the
-// two halves meet: the range has to survive the scan (logos-package-manager),
-// be evaluated at the status site (same repo), and then cross THIS ABI intact.
+// test_package_manager.cpp mocks the library, so it pins the serialiser but not
+// the evaluation. These run the real scanner and semver engine over an on-disk
+// manifest — the only place the range surviving the scan, being evaluated,
+// and crossing THIS ABI intact are all exercised together.
 // =============================================================================
 
 /**
- * Helper: fake installed module whose `dependencies` array is written verbatim,
- * so a test can use the LGX object form { name, version, signer } that the
- * plain-string helper above cannot express.
+ * Fake installed module whose `dependencies` array is written verbatim, so a
+ * test can use the object form { name, version, signer } that the plain-string
+ * helper above cannot express.
  */
 static void createFakeModuleWithRawDeps(const QString& baseDir, const QString& name,
                                         const QJsonArray& deps,
@@ -180,9 +179,7 @@ static void createFakeModuleWithRawDeps(const QString& baseDir, const QString& n
 }
 
 LOGOS_TEST(resolve_dependencies_reports_version_mismatch_end_to_end) {
-    // app needs lib ^2.0.0; lib 1.0.0 is installed. Before the range was
-    // evaluated this reported "installed" — the constraint reached this
-    // serialiser and nothing ever asked it a question.
+    // app needs lib ^2.0.0; lib 1.0.0 is installed.
     PackageManagerImpl impl;
 
     QTemporaryDir tmpDir;
@@ -228,9 +225,8 @@ LOGOS_TEST(resolve_dependencies_satisfied_range_is_installed_end_to_end) {
 }
 
 LOGOS_TEST(resolve_dependencies_absent_outranks_mismatch_end_to_end) {
-    // Absent AND constrained reports absence — the stronger fact, and the one
-    // the user can act on. The range still travels so a caller can name the
-    // version to install.
+    // Absent AND constrained reports absence, the stronger fact; the range
+    // still travels so a caller can name the version to install.
     PackageManagerImpl impl;
 
     QTemporaryDir tmpDir;
@@ -252,8 +248,8 @@ LOGOS_TEST(resolve_dependencies_absent_outranks_mismatch_end_to_end) {
 }
 
 LOGOS_TEST(get_installed_packages_carries_constraints_end_to_end) {
-    // The (b) half over a real manifest: the two readers that disagreed —
-    // `lgpm --json info` and this API — now report the same constraint.
+    // Over a real manifest, `lgpm --json info` and this API report the same
+    // constraint.
     PackageManagerImpl impl;
 
     QTemporaryDir tmpDir;
@@ -285,7 +281,7 @@ LOGOS_TEST(get_installed_packages_carries_constraints_end_to_end) {
 }
 
 LOGOS_TEST(get_installed_packages_omits_constraints_for_bare_names_end_to_end) {
-    // Every package in the fleet today. The key must be absent entirely.
+    // The key must be absent entirely.
     PackageManagerImpl impl;
 
     QTemporaryDir tmpDir;

@@ -270,12 +270,10 @@ std::vector<DependencyTreeNode> DependencyTreeNode::flatten() const {
         queue.pop_front();
         auto [slot, inserted] = indexByName.emplace(n->name, out.size());
         if (!inserted) {
-            // The real library PROMOTES here: one row per package, but a later
-            // edge that judged the package more harshly than the recorded one
-            // wins, carrying its own constraint. This mock used to dedup and
-            // stop, so a module test could see a satisfied row for a package
-            // the real resolver rejects — a test double that disagrees with
-            // the thing it doubles is worse than no double at all.
+            // The real library PROMOTES: one row per package, but a later edge
+            // that judged it more harshly than the recorded one wins, carrying
+            // its own constraint. Dedup-and-stop would show a satisfied row for
+            // a package the real resolver rejects.
             DependencyTreeNode& recorded = out[slot->second];
             const int recordedRank  = mockEdgeVerdictSeverity(recorded.status);
             const int candidateRank = mockEdgeVerdictSeverity(n->status);

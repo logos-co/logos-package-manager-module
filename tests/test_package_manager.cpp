@@ -1797,18 +1797,7 @@ LOGOS_TEST(ackPendingAction_rejects_name_not_in_multi_uninstall_batch) {
 }
 
 // ---------------------------------------------------------------------------
-// Dependency CONSTRAINTS across the module ABI.
-//
-// This serialiser is where the range and the signer used to die. lgpm carried
-// {name, version, signer} intact all the way from metadata.json through the
-// .lgx and onto disk; two readers over the SAME installed tree then disagreed:
-//
-//   lgpm --json info app                 -> dependencyConstraints:[{...}]
-//   package_manager.getInstalledPackages -> dependencies:["lib"]
-//
-// Same library, same files, one serialiser — this one. Everything past it,
-// basecamp included, was reading a payload the constraint had been stripped
-// from. These tests pin both halves: the constraint crosses, and an
+// Dependency CONSTRAINTS across the module ABI: the constraint crosses, and an
 // unconstrained package crosses byte-identically to before.
 // ---------------------------------------------------------------------------
 
@@ -1830,14 +1819,12 @@ LOGOS_TEST(getInstalledPackages_carries_dependency_constraints) {
     LogosList list = impl.getInstalledPackages();
     LOGOS_ASSERT_EQ(list.size(), static_cast<size_t>(1));
 
-    // The edge set is unchanged: still an array of plain name STRINGS, both
-    // entries present, in declared order. Widening this array instead of
-    // adding a key would have broken every consumer that indexes it as text.
+    // The edge set is unchanged: plain name STRINGS, both entries, in
+    // declared order — consumers index this array as text.
     LOGOS_ASSERT_EQ(list[0]["dependencies"].size(), static_cast<size_t>(2));
     LOGOS_ASSERT_EQ(list[0]["dependencies"][0].get<std::string>(), std::string("plain"));
     LOGOS_ASSERT_EQ(list[0]["dependencies"][1].get<std::string>(), std::string("lib"));
 
-    // The constraint now arrives alongside it.
     LOGOS_ASSERT_TRUE(list[0].contains("dependencyConstraints"));
     LOGOS_ASSERT_EQ(list[0]["dependencyConstraints"].size(), static_cast<size_t>(1));
     LogosMap c = list[0]["dependencyConstraints"][0];
@@ -1847,9 +1834,8 @@ LOGOS_TEST(getInstalledPackages_carries_dependency_constraints) {
 }
 
 LOGOS_TEST(getInstalledPackages_omits_constraints_for_bare_names) {
-    // Every package in the fleet today is this one. The new key must be
-    // ABSENT, not an empty array — a reader that does not know it sees the
-    // payload it has always seen.
+    // The key must be ABSENT, not an empty array, so a reader that does not
+    // know it sees the payload it has always seen.
     auto t = LogosTestContext("package_manager");
     InstalledPackage pkg;
     pkg.name = "app";
@@ -1885,8 +1871,8 @@ LOGOS_TEST(getInstalledPackages_carries_a_range_only_constraint) {
     LOGOS_ASSERT_FALSE(c.contains("signer"));
 }
 
-// Forward tree whose single child is installed at a version its parent's
-// range rejects: "lib" is 1.0.0, the edge asked for ^2.0.0.
+// Child installed at a version its parent's range rejects: lib is 1.0.0, the
+// edge asked for ^2.0.0.
 static DependencyTreeNode makeVersionMismatchTree() {
     DependencyTreeNode root;
     root.name = "app";
@@ -1911,9 +1897,8 @@ LOGOS_TEST(resolveDependencies_surfaces_version_mismatch) {
     LogosMap out = impl.resolveDependencies("app", true);
     LogosMap dep = out["children"][0];
     LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("version_mismatch"));
-    // Installed, so it keeps the fields an installed node has — not_installed
-    // and cycle blank them, and blanking these would hide the version that
-    // makes the mismatch actionable.
+    // Installed, so it keeps the fields an installed node has; blanking them
+    // would hide the version that makes the mismatch actionable.
     LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string("1.0.0"));
     LOGOS_ASSERT_EQ(dep["installType"].get<std::string>(), std::string("user"));
     LOGOS_ASSERT_EQ(dep["requiredVersion"].get<std::string>(), std::string("^2.0.0"));
@@ -1922,8 +1907,8 @@ LOGOS_TEST(resolveDependencies_surfaces_version_mismatch) {
 }
 
 LOGOS_TEST(resolveFlatDependencies_surfaces_version_mismatch) {
-    // The flat projection is what a list-shaped consumer reads; a status that
-    // only existed on the tree would never reach it.
+    // A status that only existed on the tree would never reach a list-shaped
+    // consumer.
     auto t = LogosTestContext("package_manager");
     setMockDependencyTree(makeVersionMismatchTree());
 
@@ -1937,21 +1922,11 @@ LOGOS_TEST(resolveFlatDependencies_surfaces_version_mismatch) {
 }
 
 LOGOS_TEST(resolveDependencies_omits_constraint_keys_when_unconstrained) {
-    // The backward-compatibility half for the tree wire format, pinned as an
-    // EXACT KEY SET rather than as a few absences.
-    //
-    // Three `contains` checks only rule out the three keys somebody thought to
-    // name. Every key added here from now on is additive by intention, and the
-    // way that intention fails is a key that turns out NOT to be conditional —
-    // emitted unconditionally, or conditional on something that is true for an
-    // ordinary package. `signerDid` is exactly that shape: it is a property of
-    // the PACKAGE, not of the edge, so it does not become absent just because
-    // this edge declared no constraint, and a test that only looked for
-    // requiredVersion/requiredSigner would not have noticed it appear here.
-    //
-    // So: count and name every key. A node with no constraints and no
-    // signature carries these five and nothing else, which is byte-for-byte
-    // what this API emitted before any of this work.
+    // Pinned as an EXACT KEY SET, not as a few absences: a new key is additive
+    // only if it is truly conditional, and `signerDid` is a property of the
+    // PACKAGE, not the edge, so it does not go absent just because this edge is
+    // unconstrained. Naming only requiredVersion/requiredSigner would not have
+    // caught it appearing here. These five are what this API emitted before.
     auto t = LogosTestContext("package_manager");
     setMockDependencyTree(makeForwardTree());
 
@@ -1966,17 +1941,16 @@ LOGOS_TEST(resolveDependencies_omits_constraint_keys_when_unconstrained) {
     LOGOS_ASSERT_TRUE(dep.contains("version"));
     LOGOS_ASSERT_TRUE(dep.contains("installType"));
     LOGOS_ASSERT_TRUE(dep.contains("children"));
-    // Named individually as well, so a failure says WHICH key appeared rather
-    // than only that the count moved.
+    // Named individually too, so a failure says WHICH key appeared.
     LOGOS_ASSERT_FALSE(dep.contains("requiredVersion"));
     LOGOS_ASSERT_FALSE(dep.contains("requiredSigner"));
     LOGOS_ASSERT_FALSE(dep.contains("signerDid"));
 }
 
 LOGOS_TEST(resolveDependencies_absent_dependency_keeps_its_declared_range) {
-    // ABSENCE OUTRANKS MISMATCH — the library decides that, but the ABI has to
-    // carry the evidence: a not_installed node still reports the range, so a
-    // caller can say WHICH version to go and install.
+    // Absence outranks mismatch — the library decides that, but a
+    // not_installed node still reports the range, so a caller can say WHICH
+    // version to go and install.
     auto t = LogosTestContext("package_manager");
     DependencyTreeNode root;
     root.name = "app";
@@ -1997,19 +1971,15 @@ LOGOS_TEST(resolveDependencies_absent_dependency_keeps_its_declared_range) {
     LOGOS_ASSERT_EQ(dep["requiredVersion"].get<std::string>(), std::string("^2.0.0"));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // The signer identity, across the ABI
 //
-// Two facts have to reach the far side, and they are different facts:
-//   requiredSigner — a PIN this package's dependant declared. A demand.
-//   signerDid      — what the installed package's own signature says of
-//                    itself, once checked against the key its DID carries.
-// Everything downstream ("signed by a different key") needs both, and carrying
-// one without the other produces a message that names an accusation with
-// nobody to accuse. Note the verdict is NOT these two compared: it comes from
-// verifying the installed signature under the pin's key, so a signer_mismatch
-// row legitimately carries a signerDid that differs from requiredSigner.
-// ─────────────────────────────────────────────────────────────────────────────
+// Two different facts, and downstream needs both: `requiredSigner` is the pin
+// the dependant declared, `signerDid` is what the installed package's own
+// signature says of itself. The verdict is NOT the two compared — it comes
+// from verifying under the pin's key, so a signer_mismatch row legitimately
+// carries a signerDid that differs from requiredSigner.
+// ---------------------------------------------------------------------------
 
 LOGOS_TEST(getInstalledPackages_carries_the_signer_did) {
     auto t = LogosTestContext("package_manager");
@@ -2028,11 +1998,8 @@ LOGOS_TEST(getInstalledPackages_carries_the_signer_did) {
 }
 
 LOGOS_TEST(getInstalledPackages_omits_the_signer_did_when_unsigned) {
-    // Every package in the fleet today is this one: no signature is
-    // installed, so the key must be ABSENT rather than an empty string. A
-    // reader must be able to tell "no signature" from a signed package, and
-    // an empty string is neither — it would read as a signer whose DID is the
-    // empty string, which no package can have.
+    // ABSENT, not an empty string: a reader must be able to tell "no
+    // signature" from signed, and an empty string reads as neither.
     auto t = LogosTestContext("package_manager");
     InstalledPackage pkg;
     pkg.name = "app";
@@ -2072,15 +2039,14 @@ LOGOS_TEST(resolveDependencies_surfaces_signer_mismatch_with_both_dids) {
     LOGOS_ASSERT_EQ(dep["requiredSigner"].get<std::string>(), std::string("did:jwk:PINNED"));
     LOGOS_ASSERT_EQ(dep["signerDid"].get<std::string>(),
                     std::string("did:jwk:SOMEBODY_ELSE"));
-    // A signer-mismatched package IS on disk. The `Installed || VersionMismatch`
-    // chain this replaced would have blanked both of these, so the far side
-    // would have shown a version-less row for a package sitting right there.
+    // A signer-mismatched package IS on disk, so it keeps these; the
+    // `Installed || VersionMismatch` chain this replaced blanked them.
     LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string("1.0.0"));
     LOGOS_ASSERT_EQ(dep["installType"].get<std::string>(), std::string("user"));
 }
 
 LOGOS_TEST(resolveFlatDependencies_surfaces_signer_mismatch) {
-    // The flat projection is the ONLY one basecamp's load gate reads. A status
+    // The flat projection is the ONLY one basecamp's load gate reads; a status
     // that reached the tree and not this list would block nothing.
     auto t = LogosTestContext("package_manager");
     setMockDependencyTree(makeSignerMismatchTree());
@@ -2097,9 +2063,8 @@ LOGOS_TEST(resolveFlatDependencies_surfaces_signer_mismatch) {
 }
 
 LOGOS_TEST(resolveDependencies_surfaces_signer_unknown_without_a_signer_did) {
-    // Absence of evidence crosses the ABI as its own status, with no
-    // signerDid key — so the far side can say "no signature is installed"
-    // rather than naming a signer it does not have.
+    // Absence of evidence crosses as its own status with no signerDid key, so
+    // the far side names no signer it does not have.
     auto t = LogosTestContext("package_manager");
     DependencyTreeNode root;
     root.name = "app";
@@ -2119,16 +2084,15 @@ LOGOS_TEST(resolveDependencies_surfaces_signer_unknown_without_a_signer_did) {
     LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("signer_unknown"));
     LOGOS_ASSERT_EQ(dep["requiredSigner"].get<std::string>(), std::string("did:jwk:PINNED"));
     LOGOS_ASSERT_FALSE(dep.contains("signerDid"));
-    // Still on disk — and an embedded package is the population that can NEVER
-    // carry a signature, because it never passes through installPluginFile,
-    // which is the only thing that copies a manifest.sig into an install tree.
+    // Still on disk. An embedded package can NEVER carry a signature: only
+    // installPluginFile copies a manifest.sig into an install tree.
     LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string("1.0.0"));
     LOGOS_ASSERT_EQ(dep["installType"].get<std::string>(), std::string("embedded"));
 }
 
 LOGOS_TEST(resolveDependencies_omits_signer_did_for_an_absent_dependency) {
-    // NotInstalled blanks version/installType, and there is no signature to
-    // report for a package that is not there.
+    // NotInstalled blanks version/installType, and an absent package has no
+    // signature to report.
     auto t = LogosTestContext("package_manager");
     DependencyTreeNode root;
     root.name = "app";
@@ -2146,7 +2110,7 @@ LOGOS_TEST(resolveDependencies_omits_signer_did_for_an_absent_dependency) {
     LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("not_installed"));
     LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string(""));
     LOGOS_ASSERT_FALSE(dep.contains("signerDid"));
-    // The pin still rides along, so a caller can say which publisher to get it
-    // from — the same courtesy requiredVersion gets on an absent row.
+    // The pin still rides along, so a caller can name the publisher to get it
+    // from — as requiredVersion does on an absent row.
     LOGOS_ASSERT_EQ(dep["requiredSigner"].get<std::string>(), std::string("did:jwk:PINNED"));
 }

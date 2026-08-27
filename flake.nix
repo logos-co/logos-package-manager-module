@@ -3,10 +3,9 @@
 
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder";
-    # `tests.mockCLibs = ["logos_pm"]` builds the unit tests against
-    # tests/stubs/package_manager_lib.h, a hand-maintained mirror. That check
-    # passes against a library it never links, so it cannot detect a mismatch
-    # with the real one — `nix build` is what catches that.
+    # `tests.mockCLibs = ["logos_pm"]` builds the unit tests against the
+    # hand-maintained mirror in tests/stubs/package_manager_lib.h, never
+    # linking the real library — only `nix build` catches a mismatch.
     logos-package-manager.url = "github:logos-co/logos-package-manager";
   };
 
