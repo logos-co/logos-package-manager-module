@@ -1937,7 +1937,21 @@ LOGOS_TEST(resolveFlatDependencies_surfaces_version_mismatch) {
 }
 
 LOGOS_TEST(resolveDependencies_omits_constraint_keys_when_unconstrained) {
-    // The backward-compatibility half for the tree wire format.
+    // The backward-compatibility half for the tree wire format, pinned as an
+    // EXACT KEY SET rather than as a few absences.
+    //
+    // Three `contains` checks only rule out the three keys somebody thought to
+    // name. Every key added here from now on is additive by intention, and the
+    // way that intention fails is a key that turns out NOT to be conditional —
+    // emitted unconditionally, or conditional on something that is true for an
+    // ordinary package. `signerDid` is exactly that shape: it is a property of
+    // the PACKAGE, not of the edge, so it does not become absent just because
+    // this edge declared no constraint, and a test that only looked for
+    // requiredVersion/requiredSigner would not have noticed it appear here.
+    //
+    // So: count and name every key. A node with no constraints and no
+    // signature carries these five and nothing else, which is byte-for-byte
+    // what this API emitted before any of this work.
     auto t = LogosTestContext("package_manager");
     setMockDependencyTree(makeForwardTree());
 
@@ -1946,8 +1960,17 @@ LOGOS_TEST(resolveDependencies_omits_constraint_keys_when_unconstrained) {
     LogosMap out = impl.resolveDependencies("root", true);
     LogosMap dep = out["children"][0];
     LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("installed"));
+    LOGOS_ASSERT_EQ(dep.size(), static_cast<size_t>(5));
+    LOGOS_ASSERT_TRUE(dep.contains("name"));
+    LOGOS_ASSERT_TRUE(dep.contains("status"));
+    LOGOS_ASSERT_TRUE(dep.contains("version"));
+    LOGOS_ASSERT_TRUE(dep.contains("installType"));
+    LOGOS_ASSERT_TRUE(dep.contains("children"));
+    // Named individually as well, so a failure says WHICH key appeared rather
+    // than only that the count moved.
     LOGOS_ASSERT_FALSE(dep.contains("requiredVersion"));
     LOGOS_ASSERT_FALSE(dep.contains("requiredSigner"));
+    LOGOS_ASSERT_FALSE(dep.contains("signerDid"));
 }
 
 LOGOS_TEST(resolveDependencies_absent_dependency_keeps_its_declared_range) {
@@ -2021,7 +2044,7 @@ LOGOS_TEST(getInstalledPackages_omits_the_signer_did_when_unsigned) {
     LOGOS_ASSERT_FALSE(list[0].contains("signerDid"));
 }
 
-// A dependency installed under the right name by the WRONG publisher.
+// A dependency installed under the right name, signed by the WRONG KEY.
 static DependencyTreeNode makeSignerMismatchTree() {
     DependencyTreeNode root;
     root.name = "app";
@@ -2097,7 +2120,8 @@ LOGOS_TEST(resolveDependencies_surfaces_signer_unknown_without_a_signer_did) {
     LOGOS_ASSERT_EQ(dep["requiredSigner"].get<std::string>(), std::string("did:jwk:PINNED"));
     LOGOS_ASSERT_FALSE(dep.contains("signerDid"));
     // Still on disk — and an embedded package is the population that can NEVER
-    // acquire a recorded publisher, because it never passes through install.
+    // carry a signature, because it never passes through installPluginFile,
+    // which is the only thing that copies a manifest.sig into an install tree.
     LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string("1.0.0"));
     LOGOS_ASSERT_EQ(dep["installType"].get<std::string>(), std::string("embedded"));
 }

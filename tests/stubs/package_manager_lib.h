@@ -27,12 +27,12 @@ enum class DependencyStatus {
     // rejects. Appended, never inserted — the real enum's numeric values are
     // ABI across libpackage_manager_lib.
     VersionMismatch,
-    // Installed, and provably NOT the package the dependant named: the key
-    // this install's signature verified against is not the `signer` DID on
-    // the edge. Identity, not trust — see the real header.
+    // Installed, and provably NOT the package the dependant named: the
+    // installed manifest.sig does not verify under the key the edge's
+    // `signer` DID carries. Identity, not trust — see the real header.
     SignerMismatch,
-    // The edge pins a `signer` and nothing records who published what is
-    // installed. Absence of evidence, reported as its own status.
+    // The edge pins a `signer` and no usable signature is installed to check
+    // it against. Absence of evidence, reported as its own status.
     SignerUnknown,
 };
 
@@ -61,7 +61,7 @@ struct Hashes {
 
 // Mirrors PackageDependency in package_manager_lib.h — one `dependencies[]`
 // entry, either a plain name or an object carrying a semver range and/or a
-// publisher DID.
+// signer DID.
 struct PackageDependency {
     std::string name;
     std::optional<std::string> version;

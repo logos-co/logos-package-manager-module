@@ -3562,15 +3562,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1787428523,
-        "narHash": "sha256-WV30+aqn7MOnz9neSY1ni8AggRPROHsc3rrocx32/1U=",
+        "lastModified": 1787801609,
+        "narHash": "sha256-+tjx4kNR8/TaBx8lL+EYEsD54w1m6rvLFiGqO6oLq9s=",
         "owner": "logos-co",
         "repo": "logos-package-manager",
-        "rev": "7c5aad9ae59961a0e28b13ca37b2d18baf4f0e9d",
+        "rev": "001f04449358cfb48e0d2d91d155b75716239097",
         "type": "github"
       },
       "original": {
         "owner": "logos-co",
+        "ref": "fix/flatten-must-not-mask-a-deeper-mismatch",
         "repo": "logos-package-manager",
         "type": "github"
       }
@@ -3750,15 +3751,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1786463662,
-        "narHash": "sha256-h2ex453W73qjkN8n6Bo9ywU5X22bssmyCMpQjR5LRzY=",
+        "lastModified": 1787798657,
+        "narHash": "sha256-ZwL5qeo0HuFOJ+h2ZM33QF07j8dpb47bw2laX8DvTYU=",
         "owner": "logos-co",
         "repo": "logos-package",
-        "rev": "3cb520c8eadde3d6d7810dee74bdd243f73f34e9",
+        "rev": "67b35c094b8e985fbcdc5adcd3ae175625c67c30",
         "type": "github"
       },
       "original": {
         "owner": "logos-co",
+        "ref": "feat/carry-the-manifest-signature",
         "repo": "logos-package",
         "type": "github"
       }
