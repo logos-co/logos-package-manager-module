@@ -115,6 +115,10 @@ LogosMap toFlatLogosMap(const DependencyTreeNode& n)
         m["version"]     = "";
         m["installType"] = "";
     }
+    // Emitted only when set, like the constraints below, so an unmarked tree
+    // crosses byte-identically. A not_installed node carrying it is NOT a
+    // broken install — a missing-dependency marker must skip it.
+    if (n.optional) m["optional"] = true;
     // The constraint the parent edge declared; absent for an unconstrained
     // edge, so a bare-name tree crosses byte-identically to before.
     // `requiredSigner` is judged by verifying the installed signature under the

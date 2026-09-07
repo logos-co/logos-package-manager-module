@@ -282,6 +282,10 @@ std::vector<DependencyTreeNode> DependencyTreeNode::flatten() const {
                 recorded.requiredVersion = n->requiredVersion;
                 recorded.requiredSigner  = n->requiredSigner;
             }
+            // Collapses conservatively and independently of the ranking above:
+            // one required edge settles it, however many optional edges also
+            // reach the package.
+            recorded.optional = recorded.optional && n->optional;
             continue;
         }
         DependencyTreeNode copy;
@@ -291,6 +295,7 @@ std::vector<DependencyTreeNode> DependencyTreeNode::flatten() const {
         copy.installType     = n->installType;
         copy.requiredVersion = n->requiredVersion;
         copy.requiredSigner  = n->requiredSigner;
+        copy.optional        = n->optional;
         copy.signerDid  = n->signerDid;
         out.push_back(std::move(copy));
         for (const auto& c : n->children) queue.push_back(&c);

@@ -109,6 +109,10 @@ struct DependencyTreeNode {
     // the dependency without one, and always absent on the root.
     std::optional<std::string> requiredVersion;
     std::optional<std::string> requiredSigner;
+    // Was the edge reaching this node declared optional? Per-edge like the two
+    // above, false on the root, and inherited by a required child of an
+    // optional edge. An absent optional dependency is not a broken install.
+    bool optional = false;
     // What the installed package's own signature says about itself; the
     // verdict comes from verifying, not from comparing it to requiredSigner.
     std::optional<std::string> signerDid;
