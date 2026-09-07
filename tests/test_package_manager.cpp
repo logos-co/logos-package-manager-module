@@ -1945,6 +1945,7 @@ LOGOS_TEST(resolveDependencies_omits_constraint_keys_when_unconstrained) {
     LOGOS_ASSERT_FALSE(dep.contains("requiredVersion"));
     LOGOS_ASSERT_FALSE(dep.contains("requiredSigner"));
     LOGOS_ASSERT_FALSE(dep.contains("signerDid"));
+    LOGOS_ASSERT_FALSE(dep.contains("optional"));
 }
 
 LOGOS_TEST(resolveDependencies_absent_dependency_keeps_its_declared_range) {
@@ -1969,6 +1970,113 @@ LOGOS_TEST(resolveDependencies_absent_dependency_keeps_its_declared_range) {
     LOGOS_ASSERT_EQ(dep["status"].get<std::string>(), std::string("not_installed"));
     LOGOS_ASSERT_EQ(dep["version"].get<std::string>(), std::string(""));
     LOGOS_ASSERT_EQ(dep["requiredVersion"].get<std::string>(), std::string("^2.0.0"));
+}
+
+// ---------------------------------------------------------------------------
+// Optional edges
+//
+// An absent optional dependency is not a broken install, so the flag must
+// survive the projection: without it a consumer sees a bare not_installed row
+// and lights its missing-dependency marker over a package nothing requires.
+// ---------------------------------------------------------------------------
+
+// Both absent, differing only in whether the edge was optional.
+static DependencyTreeNode makeAbsentOptionalTree() {
+    DependencyTreeNode root;
+    root.name = "app";
+    root.status = DependencyStatus::Installed;
+    DependencyTreeNode required;
+    required.name = "needed";
+    required.status = DependencyStatus::NotInstalled;
+    DependencyTreeNode optional;
+    optional.name = "nice_to_have";
+    optional.status = DependencyStatus::NotInstalled;
+    optional.optional = true;
+    root.children = {required, optional};
+    return root;
+}
+
+LOGOS_TEST(resolveFlatDependencies_marks_an_absent_optional_dependency) {
+    // The two rows carry the SAME status, so `optional` is the only thing
+    // separating a broken install from a package nothing requires.
+    auto t = LogosTestContext("package_manager");
+    setMockDependencyTree(makeAbsentOptionalTree());
+
+    PackageManagerImpl impl;
+
+    LogosList flat = impl.resolveFlatDependencies("app", true);
+    LOGOS_ASSERT_EQ(flat.size(), static_cast<size_t>(2));
+
+    LogosMap needed, niceToHave;
+    for (const auto& row : flat) {
+        if (row["name"].get<std::string>() == "needed") needed = row;
+        if (row["name"].get<std::string>() == "nice_to_have") niceToHave = row;
+    }
+    LOGOS_ASSERT_EQ(needed["status"].get<std::string>(), std::string("not_installed"));
+    LOGOS_ASSERT_EQ(niceToHave["status"].get<std::string>(), std::string("not_installed"));
+
+    LOGOS_ASSERT_TRUE(niceToHave.contains("optional"));
+    LOGOS_ASSERT_TRUE(niceToHave["optional"].get<bool>());
+    // Absent, not false — the additive convention the constraint keys use.
+    LOGOS_ASSERT_FALSE(needed.contains("optional"));
+}
+
+LOGOS_TEST(resolveDependencies_marks_an_absent_optional_dependency) {
+    // The tree API reuses the same projection; a flag reaching only the flat
+    // list would leave a tree-shaped consumer reading the row as broken.
+    auto t = LogosTestContext("package_manager");
+    setMockDependencyTree(makeAbsentOptionalTree());
+
+    PackageManagerImpl impl;
+
+    LogosMap out = impl.resolveDependencies("app", true);
+    LOGOS_ASSERT_FALSE(out.contains("optional"));
+    LOGOS_ASSERT_FALSE(out["children"][0].contains("optional"));
+    LOGOS_ASSERT_TRUE(out["children"][1].contains("optional"));
+    LOGOS_ASSERT_TRUE(out["children"][1]["optional"].get<bool>());
+}
+
+LOGOS_TEST(resolveFlatDependencies_optional_collapses_conservatively) {
+    // Reachable both ways: required wins, however many optional edges also
+    // reach it. Dedup is first-wins in BFS order, so the optional edge is
+    // recorded first here and must still be overridden.
+    auto t = LogosTestContext("package_manager");
+    DependencyTreeNode shared;
+    shared.name = "shared";
+    shared.status = DependencyStatus::NotInstalled;
+
+    DependencyTreeNode viaOptional;
+    viaOptional.name = "extra";
+    viaOptional.status = DependencyStatus::Installed;
+    viaOptional.optional = true;
+    DependencyTreeNode inherited = shared;
+    inherited.optional = true;
+    viaOptional.children = {inherited};
+
+    DependencyTreeNode viaRequired;
+    viaRequired.name = "core";
+    viaRequired.status = DependencyStatus::Installed;
+    viaRequired.children = {shared};
+
+    DependencyTreeNode root;
+    root.name = "app";
+    root.status = DependencyStatus::Installed;
+    root.children = {viaOptional, viaRequired};
+    setMockDependencyTree(root);
+
+    PackageManagerImpl impl;
+
+    LogosList flat = impl.resolveFlatDependencies("app", true);
+    LogosMap sharedRow, extraRow;
+    for (const auto& row : flat) {
+        if (row["name"].get<std::string>() == "shared") sharedRow = row;
+        if (row["name"].get<std::string>() == "extra")  extraRow = row;
+    }
+    // The optional-only sibling still carries the flag, so the absence below
+    // is the collapse and not the projection having dropped it entirely.
+    LOGOS_ASSERT_TRUE(extraRow.contains("optional"));
+    LOGOS_ASSERT_FALSE(sharedRow.is_null());
+    LOGOS_ASSERT_FALSE(sharedRow.contains("optional"));
 }
 
 // ---------------------------------------------------------------------------
