@@ -1833,6 +1833,54 @@ LOGOS_TEST(getInstalledPackages_carries_dependency_constraints) {
     LOGOS_ASSERT_EQ(c["signer"].get<std::string>(), std::string("did:jwk:eyJrdHkiOiJPS1AifQ"));
 }
 
+LOGOS_TEST(getInstalledPackages_carries_optional_dependencies) {
+    // Basecamp reads this map and nothing else, so a dropped key means the
+    // optional module is never loaded -- not "loaded later" or "degraded".
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage pkg;
+    pkg.name = "app";
+    pkg.version = "1.0.0";
+    pkg.dependencies = {"required_lib"};
+    PackageDependency constrained;
+    constrained.name = "fancy";
+    constrained.version = "^2.0.0";
+    pkg.optionalDependencies = {PackageDependency("plain"), constrained};
+    setMockInstalledPackages({pkg});
+
+    PackageManagerImpl impl;
+
+    LogosList list = impl.getInstalledPackages();
+    LOGOS_ASSERT_EQ(list.size(), static_cast<size_t>(1));
+
+    // The REQUIRED set is untouched: an optional edge must never widen it.
+    LOGOS_ASSERT_EQ(list[0]["dependencies"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(list[0]["dependencies"][0].get<std::string>(), std::string("required_lib"));
+
+    LOGOS_ASSERT_TRUE(list[0].contains("optionalDependencies"));
+    LOGOS_ASSERT_EQ(list[0]["optionalDependencies"].size(), static_cast<size_t>(2));
+    // A simple entry collapses to a bare name, as `dependencies` does.
+    LOGOS_ASSERT_EQ(list[0]["optionalDependencies"][0].get<std::string>(), std::string("plain"));
+    // A constrained one keeps the object form.
+    LogosMap c = list[0]["optionalDependencies"][1];
+    LOGOS_ASSERT_EQ(c["name"].get<std::string>(), std::string("fancy"));
+    LOGOS_ASSERT_EQ(c["version"].get<std::string>(), std::string("^2.0.0"));
+}
+
+LOGOS_TEST(getInstalledPackages_omits_optional_dependencies_when_none) {
+    // Absent, not empty: a package declaring none crosses byte-identically.
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage pkg;
+    pkg.name = "app";
+    pkg.dependencies = {"lib"};
+    setMockInstalledPackages({pkg});
+
+    PackageManagerImpl impl;
+
+    LogosList list = impl.getInstalledPackages();
+    LOGOS_ASSERT_EQ(list.size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_FALSE(list[0].contains("optionalDependencies"));
+}
+
 LOGOS_TEST(getInstalledPackages_omits_constraints_for_bare_names) {
     // The key must be ABSENT, not an empty array, so a reader that does not
     // know it sees the payload it has always seen.

@@ -69,6 +69,27 @@ LogosMap toLogosMap(const InstalledPackage& p)
         m["dependencyConstraints"] = constraints;
     }
 
+    // Optional dependencies, additive like the constraints above: absent when
+    // the package declares none, so every earlier package crosses
+    // byte-identically. A simple entry collapses to a bare NAME as
+    // `dependencies` does; a constrained one keeps the object form, which
+    // basecamp's readDependencyEntry accepts either way.
+    if (!p.optionalDependencies.empty()) {
+        LogosList optional = LogosList::array();
+        for (const auto& d : p.optionalDependencies) {
+            if (d.isSimple()) {
+                optional.push_back(d.name);
+            } else {
+                LogosMap o = LogosMap::object();
+                o["name"] = d.name;
+                if (d.version) o["version"] = *d.version;
+                if (d.signer)  o["signer"]  = *d.signer;
+                optional.push_back(o);
+            }
+        }
+        m["optionalDependencies"] = optional;
+    }
+
     // The DID the installed manifest.sig names, emitted only once that
     // signature verified under the key the DID itself carries. That is
     // self-consistency, not identity; only `requiredSigner` settles identity.
