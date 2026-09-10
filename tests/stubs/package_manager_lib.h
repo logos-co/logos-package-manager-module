@@ -89,6 +89,7 @@ struct InstalledPackage {
     // The subset of those entries declaring a range and/or a signer; empty
     // when every dependency is a bare name.
     std::vector<PackageDependency> dependencyConstraints;
+    std::vector<PackageDependency> optionalDependencies;
     // The DID the installed manifest.sig names, once verified under the key
     // that DID carries; nullopt when no usable signature is installed
     // (embedded, unsigned, or a signature that does not verify).
