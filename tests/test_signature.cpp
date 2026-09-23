@@ -248,7 +248,7 @@ LOGOS_TEST(install_unsigned_with_policy_none_succeeds) {
     std::string lgxPath = createUnsignedPackage(tmpDir.path(), "install_none");
     LOGOS_ASSERT_FALSE(lgxPath.empty());
 
-    LogosMap result = impl.installPlugin(lgxPath, false);
+    LogosMap result = impl.installPlugin(lgxPath, false, std::nullopt);
     LOGOS_ASSERT_FALSE(result.contains("error"));
 }
 
@@ -266,7 +266,7 @@ LOGOS_TEST(install_unsigned_with_policy_require_rejected) {
     std::string lgxPath = createUnsignedPackage(tmpDir.path(), "install_req");
     LOGOS_ASSERT_FALSE(lgxPath.empty());
 
-    LogosMap result = impl.installPlugin(lgxPath, false);
+    LogosMap result = impl.installPlugin(lgxPath, false, std::nullopt);
     LOGOS_ASSERT_TRUE(result.contains("error"));
     LOGOS_ASSERT_TRUE(result["error"].get<std::string>().find("unsigned") != std::string::npos);
 }
