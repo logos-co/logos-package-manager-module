@@ -95,7 +95,7 @@ LOGOS_TEST(installPlugin_ui_qml_without_main_emits_event_with_directory_path) {
         lastEventData = data;
     });
 
-    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false);
+    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false, std::nullopt);
     LOGOS_ASSERT_EQ(m["path"].get<std::string>(), std::string("/user/ui_plugins/hello_ui"));
     LOGOS_ASSERT_FALSE(m.contains("error"));
     LOGOS_ASSERT_EQ(lastEvent, std::string("uiPluginFileInstalled"));
@@ -121,7 +121,7 @@ LOGOS_TEST(installPlugin_empty_installedPath_still_succeeds_via_result_fallback)
         lastEventData = data;
     });
 
-    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false);
+    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false, std::nullopt);
     LOGOS_ASSERT_EQ(m["path"].get<std::string>(), std::string("/user/ui_plugins"));
     LOGOS_ASSERT_FALSE(m.contains("error"));
     LOGOS_ASSERT_EQ(lastEvent, std::string("uiPluginFileInstalled"));
