@@ -27,3 +27,6 @@ void setMockInstalledModules(std::vector<InstalledPackage> v);
 void setMockInstalledUiPlugins(std::vector<InstalledPackage> v);
 void setMockDependencyTree(std::optional<DependencyTreeNode> tree);
 void setMockDependentTree(std::optional<DependentTreeNode> tree);
+
+// The `source` the last installPluginFile() call received.
+std::string lastMockInstallSource();

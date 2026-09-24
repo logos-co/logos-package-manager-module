@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <optional>
 #include <condition_variable>
 #include <thread>
 #include <cstdint>
@@ -20,7 +21,8 @@ public:
     PackageManagerImpl& operator=(const PackageManagerImpl&) = delete;
 
     // Install from local LGX file — returns LogosMap {name, path, error, isCoreModule, ...}
-    LogosMap installPlugin(const std::string& pluginPath, bool skipIfNotNewerVersion);
+    // `source` is where the file was downloaded from; getInstalledPackages reports it back.
+    LogosMap installPlugin(const std::string& pluginPath, bool skipIfNotNewerVersion, const std::optional<std::string>& source);
 
     // Inspect an LGX file without installing. Returns package metadata plus
     // already-installed status and dependents so callers can show a confirmation

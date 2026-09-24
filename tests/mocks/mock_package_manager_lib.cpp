@@ -34,6 +34,7 @@ std::vector<InstalledPackage>     s_installedModules;
 std::vector<InstalledPackage>     s_installedUiPlugins;
 std::optional<DependencyTreeNode> s_dependencyTree;
 std::optional<DependentTreeNode>  s_dependentTree;
+std::string                       s_lastInstallSource;
 
 // Sentinel key recorded on the first mock interaction per-test. When
 // LogosCMockStore::reset() zeroes all call counts (inside LogosTestContext
@@ -49,6 +50,7 @@ void ensureFreshStateForTest() {
         s_installedUiPlugins.clear();
         s_dependencyTree.reset();
         s_dependentTree.reset();
+        s_lastInstallSource.clear();
         store.recordCall(kResetSentinel);
     }
 }
@@ -69,6 +71,10 @@ std::string mockDupCStr(const char* key, const char* fallback) {
 void setMockInstalledPackages(std::vector<InstalledPackage> v) {
     ensureFreshStateForTest();
     s_installedPackages = std::move(v);
+}
+
+std::string lastMockInstallSource() {
+    return s_lastInstallSource;
 }
 
 void setMockInstalledModules(std::vector<InstalledPackage> v) {
@@ -137,7 +143,11 @@ void PackageManagerLib::setUserUiPluginsDirectory(const std::string& dir) {
 std::string PackageManagerLib::installPluginFile(const std::string& pluginPath, std::string& errorMsg,
                                                  bool skipIfNotNewerVersion,
                                                  std::string* installedPluginPath,
-                                                 bool* isCoreModule) {
+                                                 bool* isCoreModule,
+                                                 const std::string& source) {
+    ensureFreshStateForTest();
+    s_lastInstallSource = source;
+
     LOGOS_CMOCK_RECORD("installPluginFile");
     if (skipIfNotNewerVersion) {
         LOGOS_CMOCK_RECORD("installPluginFile_skipIfNotNewer_true");

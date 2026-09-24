@@ -105,6 +105,7 @@ LogosMap toLogosMap(const InstalledPackage& p)
     m["installType"]  = std::string(installTypeToString(p.installType));
     m["installDir"]   = p.installDir;
     m["mainFilePath"] = p.mainFilePath;
+    m["source"]       = p.source;
     return m;
 }
 
@@ -219,14 +220,15 @@ PackageManagerImpl::~PackageManagerImpl()
     m_lib = nullptr;
 }
 
-LogosMap PackageManagerImpl::installPlugin(const std::string& pluginPath, bool skipIfNotNewerVersion)
+LogosMap PackageManagerImpl::installPlugin(const std::string& pluginPath, bool skipIfNotNewerVersion,
+                                           const std::optional<std::string>& source)
 {
     std::string errorMsg;
     std::string installedPluginPath;
     bool isCoreModule = false;
     std::string result = m_lib->installPluginFile(
         pluginPath, errorMsg, skipIfNotNewerVersion,
-        &installedPluginPath, &isCoreModule
+        &installedPluginPath, &isCoreModule, source.value_or("")
     );
 
     // The library reports success by returning a non-empty install location.

@@ -45,7 +45,7 @@ LOGOS_TEST(installPlugin_success_core_emits_core_event) {
         lastEventData = data;
     });
 
-    LogosMap m = impl.installPlugin("/path/to/foo.lgx", false);
+    LogosMap m = impl.installPlugin("/path/to/foo.lgx", false, std::nullopt);
     LOGOS_ASSERT_EQ(m["path"].get<std::string>(), std::string("/installed/core.dylib"));
     LOGOS_ASSERT_TRUE(m["isCoreModule"].get<bool>());
     LOGOS_ASSERT_FALSE(m.contains("error"));
@@ -68,7 +68,7 @@ LOGOS_TEST(installPlugin_success_ui_emits_ui_event) {
     PackageManagerImpl impl;
     ScopedEventSink _sink([&](const std::string& name, const std::string&) { lastEvent = name; });
 
-    LogosMap m = impl.installPlugin("/path/bar.lgx", false);
+    LogosMap m = impl.installPlugin("/path/bar.lgx", false, std::nullopt);
     LOGOS_ASSERT_FALSE(m["isCoreModule"].get<bool>());
     LOGOS_ASSERT_EQ(lastEvent, std::string("uiPluginFileInstalled"));
 }
@@ -95,7 +95,7 @@ LOGOS_TEST(installPlugin_ui_qml_without_main_emits_event_with_directory_path) {
         lastEventData = data;
     });
 
-    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false);
+    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false, std::nullopt);
     LOGOS_ASSERT_EQ(m["path"].get<std::string>(), std::string("/user/ui_plugins/hello_ui"));
     LOGOS_ASSERT_FALSE(m.contains("error"));
     LOGOS_ASSERT_EQ(lastEvent, std::string("uiPluginFileInstalled"));
@@ -121,7 +121,7 @@ LOGOS_TEST(installPlugin_empty_installedPath_still_succeeds_via_result_fallback)
         lastEventData = data;
     });
 
-    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false);
+    LogosMap m = impl.installPlugin("/path/hello_ui.lgx", false, std::nullopt);
     LOGOS_ASSERT_EQ(m["path"].get<std::string>(), std::string("/user/ui_plugins"));
     LOGOS_ASSERT_FALSE(m.contains("error"));
     LOGOS_ASSERT_EQ(lastEvent, std::string("uiPluginFileInstalled"));
@@ -138,7 +138,7 @@ LOGOS_TEST(installPlugin_failure_sets_error_no_event) {
     PackageManagerImpl impl;
     ScopedEventSink _sink([&](const std::string& name, const std::string&) { lastEvent = name; });
 
-    LogosMap m = impl.installPlugin("/bad.lgx", false);
+    LogosMap m = impl.installPlugin("/bad.lgx", false, std::nullopt);
     LOGOS_ASSERT_TRUE(m["path"].get<std::string>().empty());
     LOGOS_ASSERT_EQ(m["error"].get<std::string>(), std::string("invalid lgx"));
     LOGOS_ASSERT_TRUE(lastEvent.empty());
@@ -152,11 +152,27 @@ LOGOS_TEST(installPlugin_skipIfNotNewerVersion_passed_to_mock) {
 
     PackageManagerImpl impl;
 
-    impl.installPlugin("/x.lgx", true);
+    impl.installPlugin("/x.lgx", true, std::nullopt);
     LOGOS_ASSERT_TRUE(t.cFunctionCalled("installPluginFile_skipIfNotNewer_true"));
 
-    impl.installPlugin("/y.lgx", false);
+    impl.installPlugin("/y.lgx", false, std::nullopt);
     LOGOS_ASSERT_TRUE(t.cFunctionCalled("installPluginFile_skipIfNotNewer_false"));
+}
+
+LOGOS_TEST(installPlugin_source_passed_to_lib) {
+    auto t = LogosTestContext("package_manager");
+    PackageManagerImpl impl;
+
+    impl.installPlugin("/x.lgx", false, std::string("logos:zDvZRwzm"));
+    LOGOS_ASSERT_EQ(lastMockInstallSource(), std::string("logos:zDvZRwzm"));
+}
+
+LOGOS_TEST(installPlugin_without_source_passes_empty_source_to_lib) {
+    auto t = LogosTestContext("package_manager");
+    PackageManagerImpl impl;
+
+    impl.installPlugin("/x.lgx", false, std::nullopt);
+    LOGOS_ASSERT_EQ(lastMockInstallSource(), std::string(""));
 }
 
 LOGOS_TEST(setEmbeddedModulesDirectory_forwards_to_lib) {
@@ -215,6 +231,20 @@ LOGOS_TEST(getInstalledPackages_returns_struct_registry) {
     LOGOS_ASSERT_EQ(list[0]["name"].get<std::string>(), std::string("pkg1"));
     LOGOS_ASSERT_EQ(list[0]["version"].get<std::string>(), std::string("1.0.0"));
     LOGOS_ASSERT_TRUE(t.cFunctionCalled("getInstalledPackages"));
+}
+
+LOGOS_TEST(getInstalledPackages_reports_download_source) {
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage pkg;
+    pkg.name = "pkg1";
+    pkg.source = "logos:zDvZRwzm";
+    setMockInstalledPackages({pkg});
+
+    PackageManagerImpl impl;
+
+    LogosList list = impl.getInstalledPackages();
+    LOGOS_ASSERT_EQ(list.size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(list[0]["source"].get<std::string>(), std::string("logos:zDvZRwzm"));
 }
 
 LOGOS_TEST(getInstalledModules_returns_struct_registry) {

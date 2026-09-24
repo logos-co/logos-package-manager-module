@@ -98,6 +98,7 @@ struct InstalledPackage {
     InstallType installType = InstallType::User;
     std::string installDir;
     std::string mainFilePath;
+    std::string source;
 };
 
 // Mirrors DependencyTreeNode in package_manager_lib.h.
@@ -160,7 +161,8 @@ public:
     std::string installPluginFile(const std::string& pluginPath, std::string& errorMsg,
                                   bool skipIfNotNewerVersion = false,
                                   std::string* installedPluginPath = nullptr,
-                                  bool* isCoreModule = nullptr);
+                                  bool* isCoreModule = nullptr,
+                                  const std::string& source = "");
 
     std::vector<InstalledPackage> getInstalledPackages();
     std::vector<InstalledPackage> getInstalledModules();
