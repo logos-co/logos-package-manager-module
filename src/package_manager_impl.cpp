@@ -42,11 +42,64 @@ LogosMap toLogosMap(const InstalledPackage& p)
     m["author"]       = p.author;
     m["license"]      = p.license;
     m["icon"]         = p.icon;
+    m["manifestVersion"] = p.manifestVersion;
     m["view"]         = p.view;
 
     LogosList deps = LogosList::array();
     for (const auto& d : p.dependencies) deps.push_back(d);
     m["dependencies"] = deps;
+
+    // A SEPARATE key rather than a widened `dependencies`, which stays an
+    // array of plain name STRINGS: basecamp's PluginLoader reads that list as
+    // `dep.toString()` and skips empties, so an object-form entry would
+    // stringify to empty and the dependency would silently never load. Absent
+    // when every entry is a bare name, so an unconstrained package crosses
+    // byte-identically. Mirrors package_manager_json.cpp's
+    // `dependencyConstraints`. These are pins on OTHERS; `signerDid` below is
+    // what this package claims about itself.
+    if (!p.dependencyConstraints.empty()) {
+        LogosList constraints = LogosList::array();
+        for (const auto& d : p.dependencyConstraints) {
+            LogosMap c = LogosMap::object();
+            c["name"] = d.name;
+            if (d.version) c["version"] = *d.version;
+            if (d.signer)  c["signer"]  = *d.signer;
+            constraints.push_back(c);
+        }
+        m["dependencyConstraints"] = constraints;
+    }
+
+    // Optional dependencies, additive like the constraints above: absent when
+    // the package declares none, so every earlier package crosses
+    // byte-identically. A simple entry collapses to a bare NAME as
+    // `dependencies` does; a constrained one keeps the object form, which
+    // basecamp's readDependencyEntry accepts either way.
+    if (!p.optionalDependencies.empty()) {
+        LogosList optional = LogosList::array();
+        for (const auto& d : p.optionalDependencies) {
+            if (d.isSimple()) {
+                optional.push_back(d.name);
+            } else {
+                LogosMap o = LogosMap::object();
+                o["name"] = d.name;
+                if (d.version) o["version"] = *d.version;
+                if (d.signer)  o["signer"]  = *d.signer;
+                optional.push_back(o);
+            }
+        }
+        m["optionalDependencies"] = optional;
+    }
+
+    // The DID the installed manifest.sig names, emitted only once that
+    // signature verified under the key the DID itself carries. That is
+    // self-consistency, not identity; only `requiredSigner` settles identity.
+    // Absent when no usable signature is installed, so an unsigned or embedded
+    // package crosses byte-identically; an empty string would be ambiguous.
+    // Deliberately the same key name as in the installPluginFile /
+    // inspectPackage / verifySignature responses, but those come from
+    // lgx_verify_signature, which fills signer_did BEFORE checking, so they
+    // need a companion signatureStatus key and this one does not.
+    if (p.signerDid) m["signerDid"] = *p.signerDid;
 
     m["hashes"]       = toLogosMap(p.hashes);
     m["installType"]  = std::string(installTypeToString(p.installType));
@@ -72,13 +125,33 @@ LogosMap toFlatLogosMap(const DependencyTreeNode& n)
     LogosMap m = LogosMap::object();
     m["name"]   = n.name;
     m["status"] = std::string(dependencyStatusToString(n.status));
-    if (n.status == DependencyStatus::Installed) {
+    // Every status except NotInstalled and Cycle resolved to a package that IS
+    // installed, so it carries the fields Installed does — "needs ^2.0.0, have
+    // 1.0.0" is only actionable with both numbers. A predicate, not an
+    // `Installed || VersionMismatch` chain: such a chain silently starts
+    // blanking the version on each status appended after it was written.
+    if (nodeResolvedToAnInstalledPackage(n.status)) {
         m["version"]     = n.version;
         m["installType"] = std::string(installTypeToString(n.installType));
     } else {
         m["version"]     = "";
         m["installType"] = "";
     }
+    // Emitted only when set, like the constraints below, so an unmarked tree
+    // crosses byte-identically. A not_installed node carrying it is NOT a
+    // broken install — a missing-dependency marker must skip it.
+    if (n.optional) m["optional"] = true;
+    // The constraint the parent edge declared; absent for an unconstrained
+    // edge, so a bare-name tree crosses byte-identically to before.
+    // `requiredSigner` is judged by verifying the installed signature under the
+    // PIN's own key, not by comparing it to `signerDid`.
+    if (n.requiredVersion) m["requiredVersion"] = *n.requiredVersion;
+    if (n.requiredSigner)  m["requiredSigner"]  = *n.requiredSigner;
+    // What the installed package's own signature says about itself; absent
+    // when none is installed, which is what makes a `signer_unknown` row
+    // legible without a second call. A `signer_mismatch` row carries both, and
+    // the two differing is the normal shape of that row.
+    if (n.signerDid)  m["signerDid"]  = *n.signerDid;
     return m;
 }
 
@@ -158,13 +231,23 @@ LogosMap PackageManagerImpl::installPlugin(const std::string& pluginPath, bool s
         &installedPluginPath, &isCoreModule, source.value_or("")
     );
 
+    // The library reports success by returning a non-empty install location.
+    // installedPluginPath is a REPORTING detail, not the success signal: a
+    // QML-only ui_qml package ("main": {}) has no backend library, so it used
+    // to come back empty from a perfectly good install. Gating on it here had
+    // two consequences — uiPluginFileInstalled never fired (so Basecamp only
+    // discovered the plugin after a restart) and response["path"] was empty,
+    // which logos-package-manager-ui reads as failure and renders as a red
+    // RETRY. Patched libraries always fill installedPluginPath in; the `result`
+    // fallback keeps this correct against an older one.
     bool success = !result.empty();
+    const std::string reportedPath = installedPluginPath.empty() ? result : installedPluginPath;
 
-    if (success && !installedPluginPath.empty()) {
+    if (success) {
         if (isCoreModule) {
-            corePluginFileInstalled(installedPluginPath);
+            corePluginFileInstalled(reportedPath);
         } else {
-            uiPluginFileInstalled(installedPluginPath);
+            uiPluginFileInstalled(reportedPath);
         }
     }
 
@@ -175,7 +258,7 @@ LogosMap PackageManagerImpl::installPlugin(const std::string& pluginPath, bool s
 
     LogosMap response;
     response["name"] = stem;
-    response["path"] = success ? installedPluginPath : std::string();
+    response["path"] = success ? reportedPath : std::string();
     response["isCoreModule"] = isCoreModule;
     if (!success) {
         response["error"] = errorMsg;
