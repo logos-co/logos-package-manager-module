@@ -10,7 +10,9 @@ logos_test(
         ../src/package_manager_impl.cpp
     TEST_SOURCES
         main.cpp
+        run_as_host.cpp
         test_package_manager.cpp
+        test_caller_gate.cpp
         package_manager_events_test.cpp
     MOCK_C_SOURCES
         mocks/mock_package_manager_lib.cpp
@@ -50,6 +52,7 @@ if(LIBPM_PATH)
             ../src/package_manager_impl.cpp
         TEST_SOURCES
             main.cpp
+            run_as_host.cpp
             test_package_manager_integration.cpp
             test_directory_config.cpp
             test_scanning.cpp
