@@ -865,12 +865,6 @@ LogosMap PackageManagerImpl::requestUpgrade(const std::string& packageName,
         return response;
     }
 
-    if (isEmbedded(packageName)) {
-        response["success"] = false;
-        response["error"] = "Cannot upgrade embedded module '" + packageName + "'";
-        return response;
-    }
-
     m_pendingAction = {};
     m_pendingAction.op = PendingOp::Upgrade;
     m_pendingAction.name = packageName;
@@ -1050,9 +1044,19 @@ LogosMap PackageManagerImpl::confirmUpgrade(const std::string& packageName,
         stopAckTimerLocked();
     }
 
-    LogosMap uninstallResult = doUninstall(packageName);
+    // Embedded packages live in read-only application directories. The new
+    // version is installed in the user directory, whose copy wins on scan.
+    // Keep the embedded fallback intact; only a user-installed copy needs
+    // removal before the replacement is installed.
+    LogosMap uninstallResult;
+    if (isEmbedded(packageName)) {
+        uninstallResult["success"] = true;
+    } else {
+        uninstallResult = doUninstall(packageName);
+    }
 
-    // On successful uninstall, tell PMU to drive the download+install step
+    // Once the old user copy is removed (or an embedded copy is left alone),
+    // tell the caller to drive the download+install step
     // for the new version. The impl layer has no LogosAPI access (it only
     // communicates outward via the typed events), so we can't call
     // package_downloader directly. Instead we emit upgradeUninstallDone
