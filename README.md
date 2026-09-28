@@ -79,7 +79,7 @@ Only **one** gated flow can be pending globally (across all packages and both op
 | `ackPendingAction(name)` | `QVariantMap` | Acknowledge receipt of a `before*` event. Cancels the ack timer. Idempotent. |
 | `confirmUninstall(name)` | `QVariantMap` | Proceed with uninstall. Removes files, emits `corePluginUninstalled` / `uiPluginUninstalled`. |
 | `cancelUninstall(name)` | `QVariantMap` | Abort uninstall. Emits `uninstallCancelled(name, "user cancelled")`. |
-| `confirmUpgrade(name, releaseTag)` | `QVariantMap` | Proceed with upgrade. Uninstalls old version, emits `upgradeUninstallDone` for the caller to drive the download+install of the new version. |
+| `confirmUpgrade(name, releaseTag)` | `QVariantMap` | Proceed with upgrade. Removes an old user-installed version, but keeps an embedded version in place. Emits `upgradeUninstallDone` for the caller to drive the download+install into the user directory. |
 | `cancelUpgrade(name, releaseTag)` | `QVariantMap` | Abort upgrade. Emits `upgradeCancelled(name, releaseTag, "user cancelled")`. |
 | `resetPendingAction()` | `QVariantMap` | Clear any pending state. Called by Basecamp at startup to recover from a prior crash mid-dialog. |
 
@@ -126,7 +126,7 @@ fields from there (that is what Basecamp does).
 | `beforeUpgrade` | `{name, releaseTag, mode, installedDependents}` | A gated upgrade was requested. Listener must ack within 3s. |
 | `uninstallCancelled` | `{name, reason}` | Uninstall was cancelled — either by ack timeout or user cancel. |
 | `upgradeCancelled` | `{name, releaseTag, reason}` | Upgrade was cancelled — either by ack timeout or user cancel. |
-| `upgradeUninstallDone` | `{name, releaseTag, mode}` | Old version uninstalled during upgrade; caller should now download+install the new version. |
+| `upgradeUninstallDone` | `{name, releaseTag, mode}` | Upgrade is ready for download+install. A user-installed old version was removed; an embedded old version remains in place. |
 
 ### Usage from another module
 

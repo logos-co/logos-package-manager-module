@@ -193,8 +193,8 @@ logos_events:
     void installCancelled(const std::string& payload);
     void multiUninstallCancelled(const std::string& payload);
     void upgradeUninstallDone(const std::string& payload);
-    // Fresh-install gate approval. Unlike upgrade (which uninstalls the old
-    // version in-module and signals upgradeUninstallDone), a fresh install has
+    // Fresh-install gate approval. Unlike upgrade (which removes an old user
+    // copy in-module and signals upgradeUninstallDone), a fresh install has
     // nothing to remove first: confirmInstall simply emits this so the
     // initiator (PMU) runs its download + install chain for the approved
     // package. Payload: { name, releaseTag, repositoryUrl }.

@@ -741,7 +741,7 @@ LOGOS_TEST(requestUpgrade_rejects_empty_name) {
     LOGOS_ASSERT_FALSE(events.has("beforeUpgrade"));
 }
 
-LOGOS_TEST(requestUpgrade_rejects_embedded_package) {
+LOGOS_TEST(requestUpgrade_accepts_embedded_package) {
     auto t = LogosTestContext("package_manager");
     InstalledPackage pkg;
     pkg.name = "core_embed";
@@ -752,10 +752,12 @@ LOGOS_TEST(requestUpgrade_rejects_embedded_package) {
     EventCapture events;
     PackageManagerImpl impl;
     LogosMap r = impl.requestUpgrade("core_embed", "v2.0.0", 0, "");
-    LOGOS_ASSERT_FALSE(r["success"].get<bool>());
-    LOGOS_ASSERT_EQ(r["error"].get<std::string>(),
-                    std::string("Cannot upgrade embedded module 'core_embed'"));
-    LOGOS_ASSERT_FALSE(events.has("beforeUpgrade"));
+    LOGOS_ASSERT_TRUE(r["success"].get<bool>());
+    auto requests = events.all("beforeUpgrade");
+    LOGOS_ASSERT_EQ(requests.size(), static_cast<size_t>(1));
+    LogosMap payload = LogosMap::parse(requests[0].data);
+    LOGOS_ASSERT_EQ(payload["name"].get<std::string>(), std::string("core_embed"));
+    impl.resetPendingAction();
 }
 
 LOGOS_TEST(requestUpgrade_happy_emits_beforeUpgrade_with_tag_and_mode) {
@@ -942,6 +944,30 @@ LOGOS_TEST(confirmUpgrade_happy_emits_upgradeUninstallDone) {
     LOGOS_ASSERT_EQ(payload["name"].get<std::string>(), std::string("foo"));
     LOGOS_ASSERT_EQ(payload["releaseTag"].get<std::string>(), std::string("v2.0.0"));
     LOGOS_ASSERT_EQ(payload["mode"].get<int64_t>(), static_cast<int64_t>(3));
+}
+
+LOGOS_TEST(confirmUpgrade_keeps_embedded_package_and_starts_install) {
+    auto t = LogosTestContext("package_manager");
+    InstalledPackage pkg;
+    pkg.name = "core_embed";
+    pkg.type = "core";
+    pkg.installType = InstallType::Embedded;
+    setMockInstalledPackages({pkg});
+
+    EventCapture events;
+    PackageManagerImpl impl;
+    LOGOS_ASSERT_TRUE(impl.requestUpgrade("core_embed", "v2.0.0", 0, "")["success"].get<bool>());
+    LOGOS_ASSERT_TRUE(impl.ackPendingAction("core_embed")["success"].get<bool>());
+
+    LogosMap result = impl.confirmUpgrade("core_embed", "v2.0.0");
+    LOGOS_ASSERT_TRUE(result["success"].get<bool>());
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("uninstallPackage"));
+    LOGOS_ASSERT_FALSE(events.has("corePluginUninstalled"));
+    auto done = events.all("upgradeUninstallDone");
+    LOGOS_ASSERT_EQ(done.size(), static_cast<size_t>(1));
+    LogosMap payload = LogosMap::parse(done[0].data);
+    LOGOS_ASSERT_EQ(payload["name"].get<std::string>(), std::string("core_embed"));
+    LOGOS_ASSERT_EQ(payload["releaseTag"].get<std::string>(), std::string("v2.0.0"));
 }
 
 LOGOS_TEST(confirmUpgrade_suppresses_event_on_uninstall_failure) {
