@@ -1045,7 +1045,7 @@ LogosMap PackageManagerImpl::confirmUpgrade(const std::string& packageName,
     }
 
     // Embedded packages live in read-only application directories. The new
-    // version is installed in the user directory, whose copy wins on scan.
+    // version is installed in the user directory; the newer copy wins on scan.
     // Keep the embedded fallback intact; only a user-installed copy needs
     // removal before the replacement is installed.
     LogosMap uninstallResult;
