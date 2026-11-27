@@ -1,4 +1,5 @@
 #include "package_manager_impl.h"
+#include <logos_caller.h>
 #include <package_manager_lib.h>
 #include <lgx.h>
 #include <algorithm>
@@ -483,38 +484,68 @@ std::vector<std::string> PackageManagerImpl::getValidVariants()
     return PackageManagerLib::platformVariantsToTry();
 }
 
+namespace {
+
+// Where packages install and which signatures count as trusted decide what the
+// runtime treats as bundled: only the runtime itself or core_service may set them.
+bool mayConfigure(const char* method)
+{
+    const logos::LogosCaller caller = logos::currentCaller();
+    if (caller.isHost() || caller.isModule("core_service")) return true;
+    std::cerr << "PackageManagerImpl::" << method << ": refused for caller '"
+              << (caller.name.empty() ? "unknown" : caller.name) << "'\n";
+    return false;
+}
+
+LogosMap refused(const char* method)
+{
+    LogosMap response;
+    response["success"] = false;
+    response["error"] = std::string(method) + " is reserved for the runtime";
+    return response;
+}
+
+} // namespace
+
 void PackageManagerImpl::setEmbeddedModulesDirectory(const std::string& dir)
 {
+    if (!mayConfigure("setEmbeddedModulesDirectory")) return;
     m_lib->setEmbeddedModulesDirectory(dir);
 }
 
 void PackageManagerImpl::addEmbeddedModulesDirectory(const std::string& dir)
 {
+    if (!mayConfigure("addEmbeddedModulesDirectory")) return;
     m_lib->addEmbeddedModulesDirectory(dir);
 }
 
 void PackageManagerImpl::setEmbeddedUiPluginsDirectory(const std::string& dir)
 {
+    if (!mayConfigure("setEmbeddedUiPluginsDirectory")) return;
     m_lib->setEmbeddedUiPluginsDirectory(dir);
 }
 
 void PackageManagerImpl::addEmbeddedUiPluginsDirectory(const std::string& dir)
 {
+    if (!mayConfigure("addEmbeddedUiPluginsDirectory")) return;
     m_lib->addEmbeddedUiPluginsDirectory(dir);
 }
 
 void PackageManagerImpl::setUserModulesDirectory(const std::string& dir)
 {
+    if (!mayConfigure("setUserModulesDirectory")) return;
     m_lib->setUserModulesDirectory(dir);
 }
 
 void PackageManagerImpl::setUserUiPluginsDirectory(const std::string& dir)
 {
+    if (!mayConfigure("setUserUiPluginsDirectory")) return;
     m_lib->setUserUiPluginsDirectory(dir);
 }
 
 void PackageManagerImpl::setSignaturePolicy(const std::string& policy)
 {
+    if (!mayConfigure("setSignaturePolicy")) return;
     std::string p = policy;
     std::transform(p.begin(), p.end(), p.begin(), ::tolower);
     if (p == "none") m_lib->setSignaturePolicy(SignaturePolicy::NONE);
@@ -528,6 +559,7 @@ void PackageManagerImpl::setSignaturePolicy(const std::string& policy)
 
 void PackageManagerImpl::setKeyringDirectory(const std::string& dir)
 {
+    if (!mayConfigure("setKeyringDirectory")) return;
     m_lib->setKeyringDirectory(dir);
 }
 
@@ -551,6 +583,7 @@ LogosMap PackageManagerImpl::verifyPackage(const std::string& lgxPath)
 LogosMap PackageManagerImpl::addTrustedKey(const std::string& name, const std::string& did,
                                             const std::string& displayName, const std::string& url)
 {
+    if (!mayConfigure("addTrustedKey")) return refused("addTrustedKey");
     std::string keyringDir = m_lib->keyringDirectory();
     const char* keyringDirPtr = keyringDir.empty() ? nullptr : keyringDir.c_str();
 
@@ -571,6 +604,7 @@ LogosMap PackageManagerImpl::addTrustedKey(const std::string& name, const std::s
 
 LogosMap PackageManagerImpl::removeTrustedKey(const std::string& name)
 {
+    if (!mayConfigure("removeTrustedKey")) return refused("removeTrustedKey");
     std::string keyringDir = m_lib->keyringDirectory();
     const char* keyringDirPtr = keyringDir.empty() ? nullptr : keyringDir.c_str();
 
